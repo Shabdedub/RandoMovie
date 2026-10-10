@@ -4,8 +4,11 @@
 
 mod images;
 mod messages;
+mod pick;
 
-pub use messages::{Command, ImdbInfo, LogoRequest, TokenSource, TokenStatus, Update};
+pub use messages::{
+    CardImageKind, Command, ImageSpec, ImdbInfo, LogoRequest, TokenSource, TokenStatus, Update,
+};
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -16,9 +19,11 @@ use randomovie::error::ApiError;
 use randomovie::imdb::{ImdbError, ImdbRatings, RefreshOutcome};
 use randomovie::media::MediaType;
 use randomovie::paths::AppPaths;
+use randomovie::picker::{Picker, UnifiedGenre};
 use randomovie::platform::{credentials, region};
 use randomovie::services::ServiceCatalog;
 use randomovie::store::{Settings, Store};
+use randomovie::tmdb::model::Region;
 use randomovie::tmdb::images::{ImageKind, size_for};
 use randomovie::tmdb::{Credential, IMAGE_CACHE_CAP_BYTES, TmdbClient, build_http_client, ttl};
 use randomovie::util::time::{DAY, now_unix};
@@ -103,6 +108,15 @@ struct Worker {
     region_candidates: RefCell<Vec<String>>,
     detected_region: RefCell<String>,
     client: RefCell<Option<Rc<TmdbClient>>>,
+    /// TMDB's region list, for region names.
+    regions: RefCell<Vec<Region>>,
+    /// The services of the current region, for expanding the selection and naming chips.
+    catalog: RefCell<Option<Rc<ServiceCatalog>>>,
+    genres: RefCell<Option<Rc<Vec<UnifiedGenre>>>>,
+    /// Session cache of pool sizes and the random generator.
+    picker: Picker,
+    session: RefCell<pick::Session>,
+    prefetch: RefCell<Option<pick::Prefetch>>,
 }
 
 impl Worker {
@@ -124,6 +138,12 @@ impl Worker {
             region_candidates: RefCell::new(Vec::new()),
             detected_region: RefCell::new(region::FALLBACK_REGION.to_owned()),
             client: RefCell::new(None),
+            regions: RefCell::new(Vec::new()),
+            catalog: RefCell::new(None),
+            genres: RefCell::new(None),
+            picker: Picker::new(),
+            session: RefCell::new(pick::Session::default()),
+            prefetch: RefCell::new(None),
         }
     }
 
@@ -145,12 +165,28 @@ impl Worker {
             Command::Startup(settings) => self.startup(*settings).await,
             Command::SubmitToken(token) => self.submit_token(token).await,
             Command::RemoveToken => self.remove_token().await,
-            Command::LoadCatalog => self.load_catalog().await,
+            Command::LoadCatalog => {
+                // A new region or a retry: the prepared pick must follow the new catalog.
+                if self.load_catalog().await.is_ok() {
+                    self.refresh_prefetch(None).await;
+                }
+            }
             Command::LoadRegions => self.load_regions().await,
             Command::LoadLogos(requests) => self.load_logos(requests),
             Command::RefreshImdb => self.refresh_imdb(true).await,
             Command::ClearCache => self.clear_cache(),
             Command::NetworkChanged(online) => self.network_changed(online).await,
+            Command::Pick { id, media } => self.pick(id, media).await,
+            Command::Prefetch { media } => self.refresh_prefetch(Some(media)).await,
+            Command::Previous { id } => self.previous(id).await,
+            Command::Exclude { title, reason } => self.set_exclusion(title, Some(reason)),
+            Command::Unexclude { title } => self.set_exclusion(title, None),
+            Command::PosterWidth(width) => self.set_poster_width(width),
+            Command::LoadCardImages {
+                id,
+                poster,
+                backdrop,
+            } => self.load_card_images(id, poster, backdrop),
             Command::SaveSettings(_) | Command::Shutdown => {}
         }
     }
@@ -204,7 +240,12 @@ impl Worker {
         self.watch_online(&client);
         // Regions first: they settle which country "Automatic" means.
         self.load_regions().await;
-        self.load_catalog().await;
+        let _ = self.load_catalog().await;
+        if let Err(e) = self.genre_list().await {
+            log_warn!("genre list unavailable: {e}");
+        }
+        // With everything loaded, the first "Pick for me" can be answered at once.
+        self.refresh_prefetch(None).await;
     }
 
     fn watch_online(self: &Rc<Self>, client: &Rc<TmdbClient>) {
@@ -257,6 +298,7 @@ impl Worker {
         if let Err(e) = credentials::delete(credentials::TMDB_TARGET) {
             log_warn!("Credential Manager delete failed: {e}");
         }
+        self.cancel_prefetch();
         *self.client.borrow_mut() = None;
         log_info!("TMDB token removed from Credential Manager");
         match resolve_token() {
@@ -276,6 +318,7 @@ impl Worker {
                     *self.detected_region.borrow_mut() = best.clone();
                     self.emit(Update::DetectedRegion(best));
                 }
+                *self.regions.borrow_mut() = regions.clone();
                 self.emit(Update::Regions(regions));
             }
             Err(ApiError::Unauthorized) => self.emit(Update::Unauthorized),
@@ -283,8 +326,12 @@ impl Worker {
         }
     }
 
-    async fn load_catalog(self: &Rc<Self>) {
-        let Some(client) = self.client() else { return };
+    /// The services of the current region. The worker keeps a copy for expanding the
+    /// selection and naming chips; the UI gets its own for the tiles.
+    async fn load_catalog(self: &Rc<Self>) -> Result<Rc<ServiceCatalog>, ApiError> {
+        let Some(client) = self.client() else {
+            return Err(ApiError::Unauthorized);
+        };
         let region = self.effective_region();
         self.emit(Update::CatalogLoading);
         let (movie, tv) = tokio::join!(
@@ -293,9 +340,11 @@ impl Worker {
         );
         match movie.and_then(|movie| tv.map(|tv| (movie, tv))) {
             Ok((movie, tv)) => {
-                let catalog = ServiceCatalog::from_lists(&region, &movie, &tv);
+                let catalog = Rc::new(ServiceCatalog::from_lists(&region, &movie, &tv));
                 log_info!("{} services listed in {region}", catalog.groups.len());
-                self.emit(Update::Catalog(Box::new(catalog)));
+                *self.catalog.borrow_mut() = Some(catalog.clone());
+                self.emit(Update::Catalog(Box::new((*catalog).clone())));
+                Ok(catalog)
             }
             Err(e) => {
                 log_warn!("services for {region} unavailable: {e}");
@@ -303,6 +352,7 @@ impl Worker {
                     self.emit(Update::Unauthorized);
                 }
                 self.emit(Update::CatalogFailed(e.to_string()));
+                Err(e)
             }
         }
     }
@@ -360,6 +410,7 @@ impl Worker {
             Err(e) => e.to_string(),
         };
         self.emit_imdb(false, Some(message));
+        self.refresh_card_imdb();
     }
 
     fn emit_imdb(&self, refreshing: bool, message: Option<String>) {
@@ -398,7 +449,12 @@ impl Worker {
             && client.validate().await.is_ok()
         {
             self.load_regions().await;
-            self.load_catalog().await;
+            let _ = self.load_catalog().await;
+            if let Err(e) = self.genre_list().await {
+                log_warn!("genre list unavailable: {e}");
+            }
+            // A pick that failed to prepare while offline is tried again.
+            self.refresh_prefetch(None).await;
         }
         self.refresh_imdb(false).await;
     }

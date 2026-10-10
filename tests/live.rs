@@ -14,6 +14,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use randomovie::card;
 use randomovie::error::ApiError;
 use randomovie::format;
 use randomovie::imdb::{ImdbRatings, ImdbStatus, RefreshOutcome};
@@ -21,7 +22,7 @@ use randomovie::media::{MediaChoice, MediaType, TitleRef};
 use randomovie::paths::AppPaths;
 use randomovie::picker::genres::unify;
 use randomovie::picker::{
-    ChipGroupKind, PickRequest, Picker, SkipList, UnifiedGenre, Verdict, where_to_watch,
+    ChipGroupKind, PickRequest, Picker, SkipList, UnifiedGenre, Verdict, reverify, where_to_watch,
 };
 use randomovie::services::{ServiceCatalog, ServiceSelection};
 use randomovie::store::{Settings, Store};
@@ -209,6 +210,52 @@ fn acceptance_no_services_free_on_picks_are_free() {
     });
 }
 
+/// The Pick screen's path for a prepared pick: verify it again, then build its card.
+#[test]
+#[ignore = "live: needs the network and TMDB_TOKEN"]
+fn prepared_pick_is_verified_again_and_builds_a_card() {
+    let live = live("prepared-pick.sqlite3");
+    runtime().block_on(async {
+        let catalog = live.catalog().await;
+        let netflix = catalog.find("Netflix").expect("Netflix in AU");
+        let mut selection = ServiceSelection::default();
+        selection.set_group(netflix, true);
+        let settings = Settings {
+            include_free: false,
+            ..Settings::default()
+        };
+        let request = PickRequest::from_settings(
+            &settings,
+            REGION,
+            MediaChoice::Both,
+            selection.expand(&catalog),
+            &live.genres().await,
+        );
+        let pick = Picker::new()
+            .pick(&live.client, &live.imdb, &request, &live.skip_list())
+            .await
+            .expect("a Netflix pick");
+        let again = reverify(&live.client, &live.imdb, &request, pick.details.title_ref())
+            .await
+            .expect("details")
+            .expect("still on Netflix moments later");
+        assert_eq!(again.details.title_ref(), pick.details.title_ref());
+        let card = card::build(
+            &again.details,
+            &again.imdb,
+            &selection.expand_set(&catalog),
+            &catalog,
+            "Australia",
+        );
+        assert!(card.verdict.starts_with("Included with"), "{}", card.verdict);
+        let yours = card.watch.group(ChipGroupKind::YourServices).expect("On your services");
+        assert!(yours.chips.iter().any(|c| c.name == "Netflix"));
+        assert!(card.watch.link.as_deref().is_some_and(|link| link.contains("themoviedb.org")));
+        assert!(!card.overview.is_empty() && !card.facts.is_empty());
+        println!("{} ({}) {} | {} | {}", card.name, card.year, card.facts, card.imdb, card.verdict);
+    });
+}
+
 #[test]
 #[ignore = "live: needs the network and TMDB_TOKEN"]
 fn acceptance_search_shows_rating_and_availability_fast() {
@@ -268,10 +315,13 @@ fn imdb_refresh_is_conditional() {
     let meta = imdb.meta();
     assert!(meta.records > 1_000_000, "index has {} records", meta.records);
     assert!(meta.etag.is_some() || meta.last_modified.is_some());
-    let outcome = runtime()
-        .block_on(imdb.refresh(&reqwest::Client::new(), false))
-        .unwrap();
-    assert_eq!(outcome, RefreshOutcome::NotModified);
+    // IMDb publishes a new file daily, so the first request may download it. A second one
+    // straight after must be answered with "not modified".
+    let http = reqwest::Client::new();
+    let first = runtime().block_on(imdb.refresh(&http, false)).unwrap();
+    println!("first refresh: {first:?}");
+    let second = runtime().block_on(imdb.refresh(&http, false)).unwrap();
+    assert_eq!(second, RefreshOutcome::NotModified);
     assert!(matches!(imdb.lookup(Some("tt0133093")), ImdbStatus::Rated(_)));
 
     // Lookup speed with random ids, so the small LRU rarely helps.

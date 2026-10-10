@@ -14,12 +14,15 @@ non-commercial use.
 |---|---|---|
 | 1 | Data layer: TMDB client, IMDb pipeline, storage, eligibility and picker | Done |
 | 2 | UI shell: navigation, theming, settings, first-run flow, My Services | Done |
-| 3 | Pick screen: verification, filters, history, exclusions, prefetch | Next |
-| 4 | Search and the shared title card | Planned |
+| 3 | Pick screen: verification, filters, history, exclusions, prefetch | Done |
+| 4 | Search and the shared title card | Next |
 | 5 | Polish, accessibility, performance measurement, final README | Planned |
 
-The app opens, runs the first-run flow, and has the navigation rail, My Services, Settings and
-About. The Pick and Search pages say which phase brings them.
+Everything except Search works: first run, the Pick screen with its title card, My Services,
+Settings and About. The Search page says that phase 4 brings it.
+
+Known gap: `RandoMovie.exe` is 16.38 MB, over the 15 MB budget. Phase 5 trims it;
+PERFORMANCE.md has the breakdown and the plan.
 
 ## Prerequisites
 
@@ -73,6 +76,28 @@ The live tests call TMDB and IMDb with the token from `.env`. They keep their da
 
 Afterwards, Settings can change the region, theme, default type, free titles and obscurity
 floor, clear the cache, refresh the IMDb ratings, and change or remove the token.
+
+## The Pick screen
+
+- **Pick for me** (later **Pick again**) shows a random title you can stream now. Every pick is
+  checked against availability data under 24 hours old first. The next pick is prepared in the
+  background, so the button usually answers at once.
+- **The title card** shows the poster, title, year, Movie or Series badge, runtime or seasons,
+  genres, the IMDb rating and votes, and a three-line overview with **More**. "Where to watch
+  in {region}" gives the verdict, then the services grouped as On your services, Free, Other
+  subscriptions and Rent or buy (collapsed). **Open where to watch** opens TMDB's watch page.
+- **The filter bar** has Movies / Series / Both, genres, the minimum IMDb rating and votes,
+  the year range, and the maximum length for movies. **Reset filters** appears once anything
+  differs from the defaults.
+- **Your services** shows the services picks come from. **Edit** opens them in a side sheet.
+- **Previous** steps back through this session's picks. **Seen it** and **Not interested**
+  keep a title out of future picks, and **Undo** takes that back.
+
+| Key | Action |
+|---|---|
+| Space or Enter | Pick again, when no button or field has focus |
+| Ctrl+F | Open Search |
+| Esc | Close the open panel or the side sheet, or leave a text field |
 
 ## Where data lives
 
@@ -128,14 +153,39 @@ The spec left these points open. Each choice favours fast, light and predictable
 - **Theme and accent.** Dark is the default. The Windows accent colour is used when a shade of it
   passes WCAG AA contrast in the current theme; otherwise a built-in blue is used.
 - **Default type.** The setting decides where the Movies / Series / Both filter starts each time
-  the app opens.
+  the app opens. The filter bar's choice isn't saved; the other filters are. Changing the
+  default in Settings also changes the current choice.
+- **Prepared picks.** The next pick is prepared in the background after startup, after every
+  pick, and 0.6 s after filters or services change. It is used only if it was made for exactly
+  the current settings. A title excluded since is dropped, and availability older than 24
+  hours is verified again before it is shown.
+- **History.** "Previous" walks back through this session's picks in the order they were
+  shown, up to 100. Going back removes nothing: the next pick is added after all of them. A
+  card shown again uses availability for the current region and services.
+- **Seen it and Not interested.** Both keep the title out of future picks until undone, also
+  in later sessions. The card stays on screen. Separately, the last 50 picks are never
+  repeated.
+- **Year filter.** The panel has decade presets and From / To boxes. A box applies once it
+  holds a full year from 1870 to 2100; until then the previous range stays.
+- **No page title on Pick.** The title card gets the room instead. At the minimum window size
+  the filter bar wraps to two rows and the details scroll beside the poster.
+- **Card timing.** A new card waits up to 250 ms for its poster, so text and poster appear
+  together. If a pick takes longer than 150 ms, placeholders show in the meantime.
+- **Backdrop.** It is made from TMDB's `w300` backdrop: blurred at 160 px wide, scaled to the
+  card's exact size, and covered by an 86 % veil. The veil keeps muted text above 4.5:1 even
+  over a white image. A title without a backdrop shows the plain card.
+- **Attribution on the card.** "Streaming data: JustWatch via TMDB" sits under the "Where to
+  watch" heading, with "Open where to watch" beside it, so both stay in view.
+- **Failed picks.** The card area explains what happened and offers one way out: Reset
+  filters, Choose services, Add token or Try again. "Previous" then returns to the last card.
 - **Obscurity floor.** Settings offers Any, 25, 50 (default), 100, 250, 500 and 1,000 TMDB votes.
   A different value typed into `settings.json` is kept and shown as an extra choice.
 - **Pool sizes.** TMDB now reports at most 20,001 results and serves at most 500 pages, so a
   pool's reachable size is capped at 10,000 titles, the most popular first.
 - **Misses.** A miss is a candidate that fails verification or a filter. Excluded and recently
   picked titles are skipped before any request and don't count. A pick also stops after 10
-  page fetches, so it always ends quickly.
+  page fetches, so it always ends quickly. Candidates are verified three at a time; the pick
+  is still the first one in order that passes, so every title keeps the same chance.
 - **IMDb minimums.** With a minimum set, a title needs an IMDb rating that meets it, so titles
   without one are skipped. While the ratings are still downloading, this check is skipped and
   TMDB's `vote_average.gte` pre-filter still applies.
@@ -163,17 +213,27 @@ The spec left these points open. Each choice favours fast, light and predictable
 
 ## Acceptance checks
 
-Phase 1 checks ran at the data-layer level on 2026-10-10, region AU. They will be repeated
-through the UI in phase 3.
+Phase 3 ran the checks through the app itself on 2026-10-11, region AU, with the release build.
+A UI Automation script pressed "Pick again" and read each card from the accessibility tree, as
+a screen reader would. Each profile started with an empty cache.
 
 | Check | Result |
 |---|---|
-| One service (Netflix), free titles off: 30 consecutive picks show it under "On your services" | Pass: 30 of 30 "Included with Netflix", no repeats |
-| No services, free titles on: every pick shows a Free provider | Pass: 20 of 20, 5 of them series |
-| Search a well-known film for its IMDb rating and AU availability in about a second | Pass: "The Matrix", ★ 8.7 IMDb · 2.3M votes, AU offers, 511 ms cold |
-| Idle 60 s with a pick on screen: 0 % CPU, memory within budget | Needs the Pick screen (phases 3 and 5) |
+| One service (Netflix), free titles off: 30 consecutive picks show it under "On your services" | Pass: 30 of 30 read "Included with Netflix" with Netflix under "On your services", no repeats |
+| No services, free titles on: every pick shows a Free provider | Pass: 20 of 20 read "Free on …" with a Free group, 5 of them series |
+| Search a well-known film for its IMDb rating and AU availability in about a second | Data layer, phase 1: "The Matrix", ★ 8.7 IMDb · 2.3M votes, AU offers, 511 ms cold. The Search screen comes in phase 4 |
+| Idle 60 s with a pick on screen: 0 % CPU, memory within budget | Pass: 0 ms of CPU across all threads in 60 s, twice; 23 to 25 MB private bytes after 30 titles |
 
-The live tests above reproduce the first three checks.
+Every one of those 50 picks came from the pick prepared in the background. After the first card
+of each run, each card appeared 3 to 6 ms after the click, poster included. The first cards
+took 393 and 250 ms because their posters weren't downloaded in advance. That is fixed, and a
+first pick after a cold start now takes 8 ms. PERFORMANCE.md has the details.
+
+The live tests repeat the first three checks at the data level:
+
+```powershell
+cargo test --release --test live -- --ignored --test-threads=1 --nocapture
+```
 
 ## Attribution
 

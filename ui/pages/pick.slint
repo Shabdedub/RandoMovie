@@ -1,100 +1,527 @@
-// The home page. Phase 2 shows the active services row with its Edit side sheet; the pick
-// itself arrives in phase 3.
+// The home page: the filter bar, your services, the title card and the pick actions.
 
+import { LineEdit } from "std-widgets.slint";
 import { Theme, Icons } from "../theme.slint";
-import { AppButton, Card, FontIcon, PageTitle } from "../widgets.slint";
-import { AppState, ServicesState } from "../state.slint";
+import {
+    AppButton, ButtonKind, FilterButton, FontIcon, Segmented, TextButton, ToggleChip,
+} from "../widgets.slint";
+import { CardMetrics, TitleCardSkeleton, TitleCardView } from "../card.slint";
+import { AppState, Exclusion, PickState, PickStatus, ServicesState } from "../state.slint";
 
-export component PickPage inherits VerticalLayout {
-    padding: 32px;
-    spacing: 24px;
+// The frame of a filter's popup panel.
+component FilterPanel inherits Rectangle {
+    background: Theme.surface;
+    border-radius: Theme.radius-card;
+    border-width: 1px;
+    border-color: Theme.border-strong;
+    VerticalLayout {
+        padding: 16px;
+        spacing: 10px;
+        @children
+    }
+}
 
-    PageTitle {
-        title: "What should I watch tonight?";
-        subtitle: AppState.region-name == "" ? "" : "Streaming in " + AppState.region-name;
+component PanelTitle inherits Text {
+    font-weight: 600;
+    color: Theme.text;
+}
+
+component PanelNote inherits Text {
+    font-size: Theme.caption;
+    color: Theme.text-muted;
+    wrap: word-wrap;
+}
+
+component FilterBar inherits FlexboxLayout {
+    spacing: 8px;
+
+    Segmented {
+        label: "Movies, series or both";
+        options: ["Movies", "Series", "Both"];
+        selected <=> PickState.media-index;
+        changed(index) => {
+            PickState.media-selected(index);
+        }
     }
 
-    Card {
-        HorizontalLayout {
-            padding: 16px;
-            spacing: 12px;
-            Text {
-                text: "Your services";
-                color: Theme.text;
-                font-weight: 600;
-                vertical-alignment: center;
-            }
-            if ServicesState.active.length == 0: Text {
-                text: ServicesState.include-free ? "None selected, so picks come from free titles" : "None selected";
-                color: Theme.text-muted;
-                vertical-alignment: center;
-            }
-            for tile in ServicesState.active: Rectangle {
-                width: 32px;
-                height: 32px;
-                border-radius: 8px;
-                background: tile.logo.width > 0 ? transparent : Theme.hover;
-                accessible-role: image;
-                accessible-label: tile.name;
-                Image {
-                    source: tile.logo;
-                    width: 32px;
-                    height: 32px;
+    FilterButton {
+        icon: Icons.tag;
+        label: "Genres";
+        text: PickState.genre-summary;
+        active: PickState.genre-summary != "Any genre";
+        clicked => {
+            genre-popup.show();
+        }
+        genre-popup := PopupWindow {
+            x: 0;
+            y: parent.height + 6px;
+            width: 460px;
+            close-policy: PopupClosePolicy.close-on-click-outside;
+            FilterPanel {
+                HorizontalLayout {
+                    PanelTitle {
+                        text: "Genres";
+                        horizontal-stretch: 1;
+                    }
+                    if PickState.genre-summary != "Any genre": TextButton {
+                        text: "Any genre";
+                        accessible-text: "Clear the genre filter";
+                        clicked => {
+                            PickState.genres-cleared();
+                        }
+                    }
                 }
-            }
-            if ServicesState.active-more > 0: Text {
-                text: "+" + ServicesState.active-more;
-                color: Theme.text-muted;
-                vertical-alignment: center;
-            }
-            if ServicesState.include-free && ServicesState.active.length > 0: Text {
-                text: "plus free titles";
-                color: Theme.text-muted;
-                vertical-alignment: center;
-            }
-            Rectangle {
-                horizontal-stretch: 1;
-            }
-            AppButton {
-                text: "Edit";
-                icon: Icons.edit;
-                accessible-text: "Edit your services";
-                clicked => {
-                    AppState.open-services-sheet();
+                PanelNote {
+                    text: "Picks match any genre you choose. Some genres exist only for movies or only for series.";
+                }
+                if PickState.genre-note != "": PanelNote {
+                    text: PickState.genre-note;
+                }
+                FlexboxLayout {
+                    spacing: 8px;
+                    for genre[index] in PickState.genres: ToggleChip {
+                        text: genre.name;
+                        checked: genre.selected;
+                        toggled => {
+                            PickState.genre-toggled(index);
+                        }
+                    }
                 }
             }
         }
     }
 
-    Card {
-        vertical-stretch: 1;
-        VerticalLayout {
-            padding: 32px;
-            spacing: 12px;
-            alignment: center;
-            FontIcon {
-                glyph: Icons.shuffle;
-                font-size: 40px;
-                color: Theme.accent;
+    FilterButton {
+        icon: Icons.star;
+        label: "IMDb minimum";
+        text: PickState.imdb-summary;
+        active: PickState.imdb-filtered;
+        clicked => {
+            imdb-popup.show();
+        }
+        imdb-popup := PopupWindow {
+            x: 0;
+            y: parent.height + 6px;
+            width: 440px;
+            close-policy: PopupClosePolicy.close-on-click-outside;
+            FilterPanel {
+                PanelTitle {
+                    text: "Minimum IMDb rating";
+                }
+                Segmented {
+                    label: "Minimum IMDb rating";
+                    options: PickState.rating-options;
+                    selected <=> PickState.rating-index;
+                    changed(index) => {
+                        PickState.rating-selected(index);
+                    }
+                }
+                PanelTitle {
+                    text: "Minimum IMDb votes";
+                }
+                Segmented {
+                    label: "Minimum IMDb votes";
+                    options: PickState.votes-options;
+                    selected <=> PickState.votes-index;
+                    changed(index) => {
+                        PickState.votes-selected(index);
+                    }
+                }
+                PanelNote {
+                    text: "With a minimum set, titles without an IMDb rating are skipped.";
+                }
             }
+        }
+    }
+
+    FilterButton {
+        icon: Icons.calendar;
+        label: "Release year";
+        text: PickState.year-summary;
+        active: PickState.year-summary != "Any year";
+        clicked => {
+            year-popup.show();
+        }
+        year-popup := PopupWindow {
+            x: 0;
+            y: parent.height + 6px;
+            width: 360px;
+            close-policy: PopupClosePolicy.close-on-click-outside;
+            FilterPanel {
+                HorizontalLayout {
+                    PanelTitle {
+                        text: "Release year";
+                        horizontal-stretch: 1;
+                    }
+                    if PickState.year-summary != "Any year": TextButton {
+                        text: "Any year";
+                        accessible-text: "Clear the year filter";
+                        clicked => {
+                            PickState.decade-chosen(-1);
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    LineEdit {
+                        horizontal-stretch: 1;
+                        placeholder-text: "From";
+                        input-type: InputType.number;
+                        accessible-label: "From year";
+                        text <=> PickState.year-from;
+                        edited(text) => {
+                            PickState.years-edited(text, PickState.year-to);
+                        }
+                    }
+                    Text {
+                        text: "to";
+                        color: Theme.text-muted;
+                        vertical-alignment: center;
+                    }
+                    LineEdit {
+                        horizontal-stretch: 1;
+                        placeholder-text: "To";
+                        input-type: InputType.number;
+                        accessible-label: "To year";
+                        text <=> PickState.year-to;
+                        edited(text) => {
+                            PickState.years-edited(PickState.year-from, text);
+                        }
+                    }
+                }
+                if PickState.year-error != "": Text {
+                    text: PickState.year-error;
+                    color: Theme.danger;
+                    font-size: Theme.caption;
+                    wrap: word-wrap;
+                    accessible-live-region: AccessibleLiveness.polite;
+                }
+                FlexboxLayout {
+                    spacing: 8px;
+                    for decade[index] in ["2020s", "2010s", "2000s", "1990s", "1980s", "Before 1980"]: ToggleChip {
+                        text: decade;
+                        checked: index == PickState.decade-index;
+                        toggled => {
+                            PickState.decade-chosen(index == PickState.decade-index ? -1 : index);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    FilterButton {
+        icon: Icons.clock;
+        label: "Maximum length";
+        text: PickState.runtime-summary;
+        active: PickState.runtime-summary != "Any length";
+        clicked => {
+            runtime-popup.show();
+        }
+        runtime-popup := PopupWindow {
+            x: 0;
+            y: parent.height + 6px;
+            width: 420px;
+            close-policy: PopupClosePolicy.close-on-click-outside;
+            FilterPanel {
+                PanelTitle {
+                    text: "Maximum length";
+                }
+                Segmented {
+                    label: "Maximum length";
+                    options: PickState.runtime-options;
+                    selected <=> PickState.runtime-index;
+                    changed(index) => {
+                        PickState.runtime-selected(index);
+                    }
+                }
+                PanelNote {
+                    text: PickState.runtime-applies
+                        ? "Applies to movies. Series aren't limited by length."
+                        : "Applies to movies only, so it has no effect while you pick series.";
+                }
+            }
+        }
+    }
+
+    if PickState.filters-changed: AppButton {
+        text: "Reset filters";
+        icon: Icons.undo;
+        kind: ButtonKind.subtle;
+        clicked => {
+            PickState.reset-filters();
+        }
+    }
+}
+
+// The services picks come from, with Edit opening the side sheet.
+component ServicesRow inherits HorizontalLayout {
+    spacing: 10px;
+    height: 32px;
+    cross-axis-alignment: center;
+
+    Text {
+        text: AppState.region-name == "" ? "Your services" : "Your services in " + AppState.region-name;
+        color: Theme.text;
+        font-weight: 600;
+        vertical-alignment: center;
+    }
+    if ServicesState.active.length == 0: Text {
+        text: ServicesState.include-free ? "None selected, so picks come from free titles" : "None selected";
+        color: Theme.text-muted;
+        vertical-alignment: center;
+        overflow: elide;
+        horizontal-stretch: 1;
+    }
+    for tile in ServicesState.active: Rectangle {
+        width: 28px;
+        height: 28px;
+        border-radius: 7px;
+        background: tile.logo.width > 0 ? transparent : Theme.hover;
+        accessible-role: image;
+        accessible-label: tile.name;
+        Image {
+            source: tile.logo;
+            width: 28px;
+            height: 28px;
+            accessible-role: none;
+        }
+    }
+    if ServicesState.active-more > 0: Text {
+        text: "+" + ServicesState.active-more;
+        color: Theme.text-muted;
+        vertical-alignment: center;
+    }
+    if ServicesState.include-free && ServicesState.active.length > 0: Text {
+        text: "plus free titles";
+        color: Theme.text-muted;
+        vertical-alignment: center;
+        overflow: elide;
+        horizontal-stretch: 1;
+    }
+    if ServicesState.active.length > 0 && !ServicesState.include-free: Rectangle {
+        horizontal-stretch: 1;
+    }
+    AppButton {
+        text: "Edit";
+        icon: Icons.edit;
+        kind: ButtonKind.subtle;
+        accessible-text: "Edit your services";
+        clicked => {
+            AppState.open-services-sheet();
+        }
+    }
+}
+
+// Before the first pick: what a pick will draw from.
+component IdleView inherits VerticalLayout {
+    alignment: center;
+    spacing: 12px;
+    padding: 32px;
+    FontIcon {
+        glyph: Icons.shuffle;
+        font-size: 44px;
+        color: Theme.accent;
+    }
+    Text {
+        text: "What should I watch tonight?";
+        font-size: Theme.subtitle;
+        font-weight: 600;
+        color: Theme.text;
+        horizontal-alignment: center;
+        wrap: word-wrap;
+    }
+    Text {
+        text: PickState.idle-message;
+        color: Theme.text-muted;
+        horizontal-alignment: center;
+        wrap: word-wrap;
+    }
+    Text {
+        text: "Choose Pick for me, or press Space.";
+        font-size: Theme.caption;
+        color: Theme.text-muted;
+        horizontal-alignment: center;
+    }
+    if AppState.imdb-status != "": Text {
+        text: AppState.imdb-status + " Until they're ready, the IMDb minimum can't be checked.";
+        font-size: Theme.caption;
+        color: Theme.text-muted;
+        horizontal-alignment: center;
+        wrap: word-wrap;
+    }
+}
+
+// A pick that failed, with the way out.
+component FailedView inherits VerticalLayout {
+    alignment: center;
+    spacing: 12px;
+    padding: 32px;
+    FontIcon {
+        glyph: Icons.info;
+        font-size: 40px;
+        color: Theme.text-muted;
+    }
+    Text {
+        text: PickState.error-title;
+        font-size: Theme.subtitle;
+        font-weight: 600;
+        color: Theme.text;
+        horizontal-alignment: center;
+        wrap: word-wrap;
+    }
+    Text {
+        text: PickState.error-message;
+        color: Theme.text-muted;
+        horizontal-alignment: center;
+        wrap: word-wrap;
+    }
+    if PickState.error-action != "": HorizontalLayout {
+        alignment: center;
+        AppButton {
+            text: PickState.error-action;
+            clicked => {
+                PickState.run-error-action();
+            }
+        }
+    }
+}
+
+export component PickPage inherits Rectangle {
+    function report-size() {
+        let poster-height = CardMetrics.poster-height(stage.width, stage.height);
+        PickState.card-resized(stage.width, stage.height, poster-height * 2 / 3, poster-height);
+    }
+
+    init => {
+        root.report-size();
+    }
+
+    VerticalLayout {
+        padding: 24px;
+        padding-top: 20px;
+        spacing: 14px;
+
+        FilterBar { }
+
+        ServicesRow { }
+
+        stage := Rectangle {
+            vertical-stretch: 1;
+            min-height: 260px;
+            changed width => {
+                root.report-size();
+            }
+            changed height => {
+                root.report-size();
+            }
+
+            if PickState.status == PickStatus.idle || PickState.status == PickStatus.failed: Rectangle {
+                border-radius: Theme.radius-card;
+                background: Theme.surface;
+                border-width: 1px;
+                border-color: Theme.border;
+                if PickState.status == PickStatus.idle: IdleView { }
+                if PickState.status == PickStatus.failed: FailedView { }
+            }
+            if PickState.status == PickStatus.picking: TitleCardSkeleton { }
+            if PickState.status == PickStatus.shown: TitleCardView {
+                data: PickState.card;
+                groups: PickState.groups;
+                poster: PickState.poster;
+                backdrop: PickState.backdrop;
+                serial: PickState.card-serial;
+                open-link => {
+                    PickState.open-where-to-watch();
+                }
+            }
+
+            // Screen readers hear about each new pick or failure. Transparent rather than
+            // hidden, so it stays in the accessibility tree.
             Text {
-                text: "Ready when you are";
-                font-size: Theme.subtitle;
-                font-weight: 600;
-                color: Theme.text;
-                horizontal-alignment: center;
+                x: 0;
+                y: 0;
+                width: 1px;
+                height: 1px;
+                text: PickState.announcement;
+                color: transparent;
+                accessible-role: AccessibleRole.text;
+                accessible-label: PickState.announcement;
+                accessible-live-region: AccessibleLiveness.polite;
             }
-            Text {
-                text: "The random pick arrives in phase 3. Your region and services are saved and will shape every pick.";
-                color: Theme.text-muted;
-                horizontal-alignment: center;
-                wrap: word-wrap;
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            cross-axis-alignment: center;
+            AppButton {
+                text: "Previous";
+                icon: Icons.back;
+                enabled: PickState.can-go-back && !PickState.busy;
+                accessible-text: "Previous pick";
+                clicked => {
+                    PickState.previous();
+                }
             }
-            if AppState.imdb-status != "": Text {
-                text: AppState.imdb-status;
-                color: Theme.text-muted;
-                font-size: Theme.caption;
-                horizontal-alignment: center;
+            if PickState.status == PickStatus.shown && PickState.excluded == Exclusion.none: AppButton {
+                text: "Seen it";
+                icon: Icons.seen;
+                enabled: !PickState.busy;
+                accessible-text: "Seen it: never pick this title again";
+                clicked => {
+                    PickState.exclude(Exclusion.seen);
+                }
+            }
+            if PickState.status == PickStatus.shown && PickState.excluded == Exclusion.none: AppButton {
+                text: "Not interested";
+                icon: Icons.blocked;
+                enabled: !PickState.busy;
+                accessible-text: "Not interested: never pick this title again";
+                clicked => {
+                    PickState.exclude(Exclusion.not-interested);
+                }
+            }
+            if PickState.status == PickStatus.shown && PickState.excluded != Exclusion.none: Rectangle {
+                accessible-role: AccessibleRole.text;
+                accessible-label: (PickState.excluded == Exclusion.seen ? "Marked as seen" : "Marked not interested") + ". It won't be picked again.";
+                accessible-live-region: AccessibleLiveness.polite;
+                HorizontalLayout {
+                    spacing: 8px;
+                    padding-left: 4px;
+                    cross-axis-alignment: center;
+                    FontIcon {
+                        glyph: Icons.check;
+                        font-size: 14px;
+                        color: Theme.success;
+                    }
+                    Text {
+                        text: PickState.excluded == Exclusion.seen ? "Marked as seen" : "Marked not interested";
+                        color: Theme.text;
+                        vertical-alignment: center;
+                        accessible-role: none;
+                    }
+                    TextButton {
+                        text: "Undo";
+                        accessible-text: "Undo: this title can be picked again";
+                        clicked => {
+                            PickState.exclude(Exclusion.none);
+                        }
+                    }
+                }
+            }
+            Rectangle {
+                horizontal-stretch: 1;
+            }
+            AppButton {
+                text: PickState.has-picked ? "Pick again" : "Pick for me";
+                icon: Icons.shuffle;
+                kind: ButtonKind.primary;
+                busy: PickState.busy;
+                min-height: 40px;
+                min-width: 148px;
+                clicked => {
+                    PickState.pick();
+                }
             }
         }
     }

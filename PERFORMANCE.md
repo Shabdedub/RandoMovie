@@ -8,11 +8,76 @@ units, as Windows Explorer shows them: 1 MB is 1,048,576 bytes.
 
 | Budget | Target | Status |
 |---|---|---|
-| Idle CPU | 0 % | Shell: 0 ms of CPU in 60 s idle. Recheck with a pick on screen in phase 5 |
-| Private working set after about 20 titles | under 50 MB | Shell: 13 MB private bytes. Recheck with titles in phase 5 |
-| Window interactive after launch | within 0.5 s | Shell: visible after 120 to 140 ms |
-| `RandoMovie.exe` size | under 15 MB | 15.03 MB, over by 34 KB; phase 5 trims it |
+| Idle CPU | 0 % | 0 ms of CPU in 60 s with a pick on screen (phase 3) |
+| Private working set after about 20 titles | under 50 MB | 23 to 25 MB private bytes after 30 titles (phase 3) |
+| Window interactive after launch | within 0.5 s | Visible after 120 to 140 ms (phase 2); first frame after 61 to 103 ms in phase 3 |
+| `RandoMovie.exe` size | under 15 MB | **16.38 MB, over by 1.38 MB.** Phase 5 trims it; see "Exe size" below |
 | IMDb rebuild peak memory | "modest" | About 2 MB extra, see below |
+
+## Phase 3: Pick screen
+
+Measured on 2026-10-11 with the release build on the same machine and connection, region AU,
+with UI Automation pressing "Pick again" and reading each card from the accessibility tree.
+Each profile started with the IMDb index in place and an empty cache.
+
+| Measurement | Result |
+|---|---|
+| Idle for 60 s with a pick on screen, all threads (two runs) | 0 ms of CPU |
+| Private bytes after 30 titles (two runs) | 23.0 and 24.7 MB; working set 49 to 60 MB, including shared system DLL pages |
+| Picks answered from the prepared pick, 2.5 s between clicks | Netflix only: 30 of 30. Free titles only: 20 of 20 |
+| Click to new card on screen, poster included, prepared pick | 3 to 6 ms (48 cards after the first of each run, from the app's log) |
+| First pick after a cold start, clicked 8 s after launch | 8 ms, poster included |
+| Startup: window created / first frame (three launches) | 54 to 99 ms / 61 to 103 ms |
+| 30 Netflix picks back to back at the data level (live test, cold cache) | 13.5 s, 0.45 s each |
+
+### What makes "Pick again" instant
+
+- The worker prepares the next pick in the background and downloads its poster and backdrop
+  into the image cache, so showing it needs no network. The UI reports the poster's size as
+  soon as the page is laid out, so even the pick prepared during startup has its poster
+  ready. Before that hint existed, the first card of a run took 250 to 393 ms.
+- The UI holds the new card for up to 250 ms until its poster is decoded at the exact size, so
+  text and poster replace the old card in one frame.
+- Verification checks three candidates at a time (`VERIFY_BATCH`). The chosen title is still
+  the first one in try order that passes, so the odds don't change, but a run of misses is
+  three times shorter. This matters most for free titles: many are obscure and fail the IMDb
+  minimums. Before batching, with 2.5 s between clicks, only 11 of 20 free-only picks were
+  ready in time and the slowest waited 4.4 s; after it, all 20 were ready.
+
+### Exe size
+
+Phase 3 added 1.34 MB: the exe went from 15.03 MB to 16.38 MB (17,175,040 bytes). `cargo bloat`
+on an unstripped build puts the code at 11.1 MB, up from 9.8 MB, and spreads the growth over
+the new screen rather than one dependency:
+
+| Code | Phase 2 | Phase 3 |
+|---|---|---|
+| Rust standard library, including generic code instantiated for the app's types | 1.8 MB | 2.3 MB |
+| The app's UI, mostly code generated from the `.slint` files | 1.2 MB | 1.6 MB |
+| The data layer (`randomovie` library) | in "the rest" | 0.15 MB |
+| `taffy`, the flexbox solver behind `FlexboxLayout` (already linked, now used) | none | 0.06 MB |
+
+Phase 5 has to win back about 1.4 MB, plus whatever Search adds in phase 4. The candidates,
+in order: optimizing cold code for size (`opt-level = "s"` per package for the SVG stack,
+networking, SQLite and accessibility), trimming the generated UI code, and looking again at
+decoders the app never uses, such as WebP, which Slint's image loading pulls in.
+
+### Memory
+
+Only the card on screen keeps decoded images: the poster at its exact size and the backdrop at
+the card's exact size. In the test window (1120 × 639 logical at 150 %) the poster is 408 × 612
+pixels (1.0 MB) and the backdrop 1476 × 672 (3.8 MB). Both are dropped when another page shows
+and decoded again from the image cache when Pick returns. Chip logos are 24 px images in the
+same logo map as the service tiles, bounded by the number of services in the region.
+
+### Method
+
+- **Picks.** A UI Automation script invokes "Pick again", polls the accessibility tree until a
+  new card appears, and checks its verdict and its "On your services" or "Free" group. It waits
+  2.5 s after each card, like someone reading it. The app's log records whether each pick came
+  from the prepared pick, and the time from the click to the card on screen.
+- **Idle and memory.** After the 30 picks, the script waits 5 s, then records every thread's
+  `TotalProcessorTime` and the process's private bytes, waits 60 s, and reads them again.
 
 ## Phase 2: UI shell
 

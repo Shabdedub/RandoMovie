@@ -27,6 +27,9 @@ use crate::tmdb::{Freshness, TmdbClient};
 
 pub const MAX_MISSES: u32 = 10;
 pub const MAX_PAGE_FETCHES: u32 = 10;
+/// Candidates verified at the same time. The pick is still the first candidate in try order
+/// that passes, so the odds are unchanged; a run of misses just costs a third of the time.
+pub const VERIFY_BATCH: usize = 3;
 /// Picks this recent are never repeated.
 pub const RECENT_PICKS_EXCLUDED: usize = 50;
 
@@ -274,23 +277,51 @@ impl Picker {
             }
 
             let order = try_order(offset, page.results.len(), &mut self.rng());
-            for i in order {
-                let title = TitleRef::new(query.media, page.results[i].id);
-                if skip.contains(&title) {
-                    continue;
-                }
-                match verify(catalog, ratings, request, &services, title).await? {
-                    Some(pick) => return Ok(pick),
-                    None => {
-                        misses += 1;
-                        if misses >= MAX_MISSES {
-                            break;
-                        }
-                    }
+            let candidates: Vec<TitleRef> = order
+                .into_iter()
+                .map(|i| TitleRef::new(query.media, page.results[i].id))
+                .filter(|title| !skip.contains(title))
+                .collect();
+            let mut rest = candidates.as_slice();
+            while !rest.is_empty() && misses < MAX_MISSES {
+                let size = rest.len().min(VERIFY_BATCH).min((MAX_MISSES - misses) as usize);
+                let (batch, after) = rest.split_at(size);
+                rest = after;
+                if let Some(pick) = self.verify_batch(catalog, ratings, request, &services, batch, &mut misses).await? {
+                    return Ok(pick);
                 }
             }
         }
         Err(PickError::NothingMatches)
+    }
+
+    /// Verifies up to `VERIFY_BATCH` candidates at once and returns the first that passes, in
+    /// try order. Misses before it are counted; an error before it ends the pick, as it would
+    /// one candidate at a time.
+    async fn verify_batch<C: Catalog, R: RatingSource>(
+        &self,
+        catalog: &C,
+        ratings: &R,
+        request: &PickRequest,
+        services: &HashSet<u32>,
+        batch: &[TitleRef],
+        misses: &mut u32,
+    ) -> Result<Option<Pick>, PickError> {
+        debug_assert!(batch.len() <= VERIFY_BATCH, "three futures are joined below");
+        let check = |i: usize| async move {
+            match batch.get(i) {
+                Some(&title) => Some(verify(catalog, ratings, request, services, title).await),
+                None => None,
+            }
+        };
+        let (a, b, c) = tokio::join!(check(0), check(1), check(2));
+        for result in [a, b, c].into_iter().flatten() {
+            match result? {
+                Some(pick) => return Ok(Some(pick)),
+                None => *misses += 1,
+            }
+        }
+        Ok(None)
     }
 
     /// Page-1 sizes for up to four pools, fetched concurrently on first use.
@@ -328,6 +359,18 @@ impl Picker {
     }
 }
 
+/// Checks one title against `request` again with availability no older than 24 hours, for
+/// a prefetched pick whose data has aged. `Ok(None)` means it no longer qualifies.
+pub async fn reverify<C: Catalog, R: RatingSource>(
+    catalog: &C,
+    ratings: &R,
+    request: &PickRequest,
+    title: TitleRef,
+) -> Result<Option<Pick>, PickError> {
+    let services: HashSet<u32> = request.services.iter().copied().collect();
+    verify(catalog, ratings, request, &services, title).await
+}
+
 /// Fetches details and applies the guarantee and the filters. `Ok(None)` is a miss.
 async fn verify<C: Catalog, R: RatingSource>(
     catalog: &C,
@@ -358,7 +401,7 @@ async fn verify<C: Catalog, R: RatingSource>(
 
 /// With a minimum set, a title needs an IMDb rating that meets it. While the ratings are
 /// still downloading the check is skipped; discover's `vote_average.gte` still applies.
-fn passes_imdb_minimums(status: &ImdbStatus, request: &PickRequest) -> bool {
+pub fn passes_imdb_minimums(status: &ImdbStatus, request: &PickRequest) -> bool {
     if request.min_imdb_x10.is_none() && request.min_imdb_votes.is_none() {
         return true;
     }
@@ -382,6 +425,8 @@ mod tests {
     const NETFLIX: u32 = 8;
     const SBS: u32 = 132;
     const APPLE_STORE: u32 = 2;
+    /// A movie whose details always time out. No discover pool lists it.
+    const TIMES_OUT: u32 = 44;
 
     fn offer(id: u32) -> Offer {
         Offer {
@@ -454,6 +499,9 @@ mod tests {
         async fn details(&self, title: TitleRef, _region: &str) -> Result<TitleDetails, ApiError> {
             self.detail_calls.set(self.detail_calls.get() + 1);
             let id = title.id;
+            if id == TIMES_OUT {
+                return Err(ApiError::Timeout);
+            }
             let mut availability = RegionAvailability {
                 rent: vec![offer(APPLE_STORE)],
                 ..Default::default()
@@ -574,6 +622,39 @@ mod tests {
         let short = TitleRef::new(MediaType::Movie, 18); // 98 minutes, on Netflix
         assert_eq!(run(verify(&catalog, &FakeRatings, &req, &services, long)), Ok(None));
         assert!(run(verify(&catalog, &FakeRatings, &req, &services, short)).unwrap().is_some());
+    }
+
+    #[test]
+    fn batches_pick_the_first_pass_in_try_order() {
+        let catalog = FakeCatalog::new();
+        let picker = Picker::with_seed(1);
+        let req = request(&[NETFLIX], false, MediaChoice::Movies);
+        let services: HashSet<u32> = [NETFLIX].into();
+        let movies = |ids: &[u32]| ids.iter().map(|&id| TitleRef::new(MediaType::Movie, id)).collect::<Vec<_>>();
+        let batch = |ids: &[u32]| {
+            let mut misses = 0;
+            let result = run(picker.verify_batch(&catalog, &FakeRatings, &req, &services, &movies(ids), &mut misses));
+            (result.map(|pick| pick.map(|p| p.details.id)), misses)
+        };
+        // 12 and 18 stream on Netflix; 10 and 14 don't.
+        assert_eq!(batch(&[14, 12, 18]), (Ok(Some(12)), 1));
+        assert_eq!(batch(&[18, 12]), (Ok(Some(18)), 0));
+        assert_eq!(batch(&[14, 10]), (Ok(None), 2));
+        // An error counts only where checking one at a time would have reached it.
+        assert_eq!(batch(&[14, TIMES_OUT, 12]), (Err(PickError::Api(ApiError::Timeout)), 1));
+        assert_eq!(batch(&[12, TIMES_OUT]), (Ok(Some(12)), 0));
+    }
+
+    #[test]
+    fn reverify_checks_one_title_again() {
+        let catalog = FakeCatalog::new();
+        let req = request(&[NETFLIX], false, MediaChoice::Movies);
+        let still_there = TitleRef::new(MediaType::Movie, 12);
+        let left_netflix = TitleRef::new(MediaType::Movie, 14);
+        let below_minimum = TitleRef::new(MediaType::Movie, 9);
+        assert!(run(reverify(&catalog, &FakeRatings, &req, still_there)).unwrap().is_some());
+        assert_eq!(run(reverify(&catalog, &FakeRatings, &req, left_netflix)), Ok(None));
+        assert_eq!(run(reverify(&catalog, &FakeRatings, &req, below_minimum)), Ok(None));
     }
 
     #[test]

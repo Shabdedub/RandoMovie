@@ -1,6 +1,6 @@
 [package]
 name = "randomovie"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.92"
 description = "RandoMovie: a lightweight random movie and series picker for Windows"

@@ -75,6 +75,110 @@ export global OnboardingState {
     callback finish();
 }
 
+// ---- Pick screen and the title card ----------------------------------------------------
+
+export enum PickStatus { idle, picking, shown, failed }
+
+export enum Exclusion { none, seen, not-interested }
+
+export struct GenreOption {
+    name: string,
+    selected: bool,
+}
+
+// One service under "Where to watch".
+export struct WatchChip {
+    name: string,
+    logo: image,
+}
+
+// `kind`: 0 on your services, 1 free, 2 other subscriptions, 3 rent or buy.
+export struct WatchGroup {
+    label: string,
+    kind: int,
+    chips: [WatchChip],
+}
+
+// The title card's text. Shared by Pick and (from phase 4) Search.
+export struct TitleCardData {
+    name: string,
+    year: string,
+    kind: string,
+    facts: string,
+    overview: string,
+    // "8.7 IMDb · 2.3M votes" (the star is drawn as an icon), or the unavailable/loading text.
+    imdb: string,
+    // 0 rated, 1 unavailable, 2 loading
+    imdb-state: int,
+    verdict: string,
+    // 0 on your services, 1 free, 2 not on your services, 3 not streaming in the region
+    verdict-state: int,
+    region-name: string,
+    link: string,
+}
+
+export global PickState {
+    // Filter bar
+    in-out property <int> media-index: 2;
+    in property <[GenreOption]> genres;
+    in property <string> genre-summary: "Any genre";
+    in property <string> genre-note;
+    in property <[string]> rating-options;
+    in-out property <int> rating-index;
+    in property <[string]> votes-options;
+    in-out property <int> votes-index;
+    in property <string> imdb-summary;
+    in property <bool> imdb-filtered;
+    in-out property <string> year-from;
+    in-out property <string> year-to;
+    in property <string> year-summary: "Any year";
+    in property <string> year-error;
+    // The decade chip matching the year range, or -1.
+    in property <int> decade-index: -1;
+    in property <[string]> runtime-options;
+    in-out property <int> runtime-index;
+    in property <string> runtime-summary: "Any length";
+    in property <bool> runtime-applies: true;
+    in property <bool> filters-changed;
+
+    // The pick
+    in property <PickStatus> status: PickStatus.idle;
+    in property <bool> busy;
+    in property <bool> has-picked;
+    in property <TitleCardData> card;
+    // Changes with every new title.
+    in property <int> card-serial;
+    in property <[WatchGroup]> groups;
+    in property <image> poster;
+    in property <image> backdrop;
+    in property <bool> can-go-back;
+    in property <Exclusion> excluded;
+    in property <string> idle-message;
+    in property <string> error-title;
+    in property <string> error-message;
+    in property <string> error-action;
+    // Announced to screen readers when a pick arrives or fails.
+    in property <string> announcement;
+
+    callback pick();
+    callback previous();
+    // `Exclusion.none` undoes "Seen it" or "Not interested".
+    callback exclude(Exclusion);
+    callback media-selected(int);
+    callback genre-toggled(int);
+    callback genres-cleared();
+    callback rating-selected(int);
+    callback votes-selected(int);
+    callback years-edited(string, string);
+    callback decade-chosen(int);
+    callback runtime-selected(int);
+    callback reset-filters();
+    callback run-error-action();
+    callback open-where-to-watch();
+    // The card's size and its poster's, in logical pixels, whenever they change.
+    callback card-resized(length, length, length, length);
+}
+
 export global SettingsState {
     in property <[string]> region-names;
     in-out property <int> region-index;

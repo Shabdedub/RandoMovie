@@ -17,6 +17,8 @@ export global Theme {
     out property <color> border: dark ? #2a3040 : #dde1e8;
     out property <color> border-strong: dark ? #3b4356 : #c3c9d4;
     out property <color> scrim: dark ? #000000a6 : #0f111566;
+    // Over the blurred backdrop; strong enough that muted text keeps 4.5:1 even over white.
+    out property <color> backdrop-veil: dark ? #171a21db : #ffffffdb;
 
     // Text (all at least 4.5:1 on every surface)
     out property <color> text: dark ? #f2f4f8 : #14171f;
@@ -31,6 +33,8 @@ export global Theme {
     out property <color> warning: dark ? #f2c94c : #7a5000;
     out property <color> warning-subtle: dark ? #3a3216 : #fff3cd;
     out property <color> success: dark ? #5fd38d : #1e7f45;
+    // IMDb's yellow in dark mode; a darker gold keeps 3:1 on light surfaces.
+    out property <color> star: dark ? #f5c518 : #a87700;
 
     // Shape: 8 px grid, 12 px cards, 8 px controls
     out property <length> radius-card: 12px;
@@ -76,4 +80,13 @@ export global Icons {
     out property <string> offline: "\u{E871}";
     out property <string> library: "\u{E8F1}";
     out property <string> movies: "\u{E8B2}";
+    out property <string> chevron-up: "\u{E70E}";
+    out property <string> seen: "\u{E890}";
+    out property <string> blocked: "\u{E733}";
+    out property <string> undo: "\u{E7A7}";
+    out property <string> star: "\u{E735}";
+    out property <string> completed: "\u{E930}";
+    out property <string> calendar: "\u{E787}";
+    out property <string> clock: "\u{E823}";
+    out property <string> tag: "\u{E8EC}";
 }

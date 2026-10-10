@@ -356,3 +356,234 @@ export component Skeleton inherits Rectangle {
     border-radius: 6px;
     accessible-role: none;
 }
+
+// A text-only button in the accent colour, for "More", "Undo" and similar.
+export component TextButton inherits Rectangle {
+    in property <string> text;
+    in property <string> icon;
+    in property <string> accessible-text: root.text;
+    callback clicked();
+
+    min-width: row.min-width;
+    min-height: 24px;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    border-radius: 4px;
+    accessible-role: button;
+    accessible-label: root.accessible-text;
+    accessible-action-default => {
+        root.clicked();
+    }
+
+    focus := FocusScope {
+        focus-on-click: false;
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == Key.Space) {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+        touch := TouchArea {
+            mouse-cursor: MouseCursor.pointer;
+            clicked => {
+                root.clicked();
+            }
+        }
+    }
+
+    row := HorizontalLayout {
+        spacing: 4px;
+        alignment: start;
+        Text {
+            text: root.text;
+            color: touch.has-hover ? Theme.accent-hover : Theme.accent;
+            font-weight: 600;
+            vertical-alignment: center;
+            accessible-role: none;
+        }
+        if root.icon != "": FontIcon {
+            glyph: root.icon;
+            font-size: 11px;
+            color: touch.has-hover ? Theme.accent-hover : Theme.accent;
+        }
+    }
+
+    Rectangle {
+        x: -3px;
+        y: -1px;
+        width: root.width + 6px;
+        height: root.height + 2px;
+        border-radius: 4px;
+        border-width: 2px;
+        border-color: Theme.accent;
+        visible: focus.has-focus;
+    }
+}
+
+// A small rounded label, such as the Movie / Series badge.
+export component Pill inherits Rectangle {
+    in property <string> text;
+    width: label.preferred-width + 16px;
+    height: 22px;
+    border-radius: 11px;
+    background: Theme.accent-subtle;
+    label := Text {
+        text: root.text;
+        font-size: Theme.caption;
+        font-weight: 600;
+        color: Theme.text;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+// A filter in the filter bar: shows the current choice and opens its panel.
+export component FilterButton inherits Rectangle {
+    in property <string> icon;
+    in property <string> text;
+    // What the filter is, for screen readers: "Genres", "IMDb minimum", ...
+    in property <string> label;
+    // True when the filter narrows the picks, so it stands out.
+    in property <bool> active;
+    callback clicked();
+
+    height: 32px;
+    min-width: row.min-width;
+    horizontal-stretch: 0;
+    border-radius: Theme.radius-control;
+    border-width: 1px;
+    border-color: root.active ? Theme.accent : Theme.border-strong;
+    background: touch.pressed ? Theme.pressed
+        : touch.has-hover ? Theme.hover
+        : root.active ? Theme.accent-subtle
+        : Theme.raised;
+    animate background { duration: 120ms; }
+
+    accessible-role: button;
+    accessible-label: root.label + ": " + root.text;
+    accessible-action-default => {
+        root.clicked();
+    }
+
+    focus := FocusScope {
+        focus-on-click: false;
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == Key.Space || event.text == Key.DownArrow) {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+        touch := TouchArea {
+            mouse-cursor: MouseCursor.pointer;
+            clicked => {
+                root.clicked();
+            }
+        }
+    }
+
+    row := HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 10px;
+        spacing: 8px;
+        FontIcon {
+            glyph: root.icon;
+            font-size: 14px;
+            color: root.active ? Theme.accent : Theme.text-muted;
+        }
+        Text {
+            text: root.text;
+            color: Theme.text;
+            vertical-alignment: center;
+            accessible-role: none;
+        }
+        FontIcon {
+            glyph: Icons.chevron-down;
+            font-size: 10px;
+            color: Theme.text-muted;
+        }
+    }
+
+    Rectangle {
+        x: -3px;
+        y: -3px;
+        width: root.width + 6px;
+        height: root.height + 6px;
+        border-radius: root.border-radius + 3px;
+        border-width: 2px;
+        border-color: Theme.accent;
+        visible: focus.has-focus;
+    }
+}
+
+// A rounded on/off chip, such as a genre in the genre filter.
+export component ToggleChip inherits Rectangle {
+    in property <string> text;
+    in property <bool> checked;
+    callback toggled();
+
+    height: 30px;
+    width: row.preferred-width;
+    border-radius: 15px;
+    border-width: 1px;
+    border-color: root.checked ? Theme.accent : Theme.border-strong;
+    background: touch.pressed ? Theme.pressed
+        : touch.has-hover ? Theme.hover
+        : root.checked ? Theme.accent-subtle
+        : transparent;
+
+    accessible-role: checkbox;
+    accessible-label: root.text;
+    accessible-checkable: true;
+    accessible-checked: root.checked;
+    accessible-action-default => {
+        root.toggled();
+    }
+
+    focus := FocusScope {
+        focus-on-click: false;
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == Key.Space) {
+                root.toggled();
+                return accept;
+            }
+            reject
+        }
+        touch := TouchArea {
+            mouse-cursor: MouseCursor.pointer;
+            clicked => {
+                root.toggled();
+            }
+        }
+    }
+
+    row := HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 6px;
+        if root.checked: FontIcon {
+            glyph: Icons.check;
+            font-size: 11px;
+            color: Theme.accent;
+        }
+        Text {
+            text: root.text;
+            color: Theme.text;
+            font-size: 13px;
+            vertical-alignment: center;
+            accessible-role: none;
+        }
+    }
+
+    Rectangle {
+        x: -3px;
+        y: -3px;
+        width: root.width + 6px;
+        height: root.height + 6px;
+        border-radius: root.border-radius + 3px;
+        border-width: 2px;
+        border-color: Theme.accent;
+        visible: focus.has-focus;
+    }
+}

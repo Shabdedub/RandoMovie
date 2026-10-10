@@ -2,6 +2,8 @@
 //! worker, and applies the worker's updates to the Slint models. It never does I/O itself:
 //! settings changes are saved by the worker.
 
+mod pick;
+
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -23,10 +25,11 @@ use crate::{
     AppState, AppWindow, OnboardingState, OnboardingStep, Page, ServiceTile, ServicesState,
     SettingsState, TokenForm, VariantRow,
 };
+use pick::{CHIP_LOGO, PickView};
 
 /// Logo sizes in logical pixels; requests are scaled to physical pixels.
 const TILE_LOGO: f32 = 44.0;
-const ACTIVE_LOGO: f32 = 32.0;
+const ACTIVE_LOGO: f32 = 28.0;
 /// Service logos shown on the Pick page before "+N".
 const ACTIVE_ROW_MAX: usize = 10;
 /// Choices for the obscurity floor (minimum TMDB votes).
@@ -34,6 +37,8 @@ const FLOOR_PRESETS: [u32; 7] = [0, 25, 50, 100, 250, 500, 1000];
 
 pub struct Controller {
     sender: UnboundedSender<Command>,
+    /// For timers, which run later without a window reference.
+    weak: slint::Weak<AppWindow>,
     settings: Settings,
     system_dark: bool,
     detected_region: String,
@@ -56,6 +61,7 @@ pub struct Controller {
     imdb: ImdbInfo,
     /// The window's size and position when not maximized, kept current by window events.
     normal_geometry: Rc<Cell<Option<WindowGeometry>>>,
+    pick: PickView,
 }
 
 fn logo_key(path: &str, px: u32) -> String {
@@ -78,8 +84,10 @@ impl Controller {
         system_dark: bool,
         normal_geometry: Rc<Cell<Option<WindowGeometry>>>,
     ) -> Controller {
-        let controller = Controller {
+        let media = settings.default_media;
+        let mut controller = Controller {
             sender,
+            weak: ui.as_weak(),
             settings,
             system_dark,
             detected_region: String::new(),
@@ -99,6 +107,7 @@ impl Controller {
             token_entered: false,
             imdb: ImdbInfo::default(),
             normal_geometry,
+            pick: PickView::new(media),
         };
         controller.initialise(ui);
         controller
@@ -108,7 +117,7 @@ impl Controller {
         &self.settings
     }
 
-    fn initialise(&self, ui: &AppWindow) {
+    fn initialise(&mut self, ui: &AppWindow) {
         let app = ui.global::<AppState>();
         app.set_onboarding(!self.settings.setup_complete);
         app.set_page(Page::Pick);
@@ -145,6 +154,7 @@ impl Controller {
         self.refresh_floor_ui(ui);
         self.refresh_region_ui(ui);
         self.refresh_imdb_ui(ui);
+        self.init_pick(ui);
     }
 
     fn send(&self, command: Command) {
@@ -222,6 +232,7 @@ impl Controller {
                 ui.global::<AppState>().set_offline(!online);
                 if online {
                     self.request_logos(ui);
+                    self.reload_card_images(ui);
                 }
             }
             Update::Imdb(info) => {
@@ -233,6 +244,17 @@ impl Controller {
                 settings.set_cache_size(format!("{} of cached data and images", format::bytes(bytes)).into());
                 settings.set_clearing_cache(false);
             }
+            Update::Genres(names) => self.on_genres(ui, names),
+            Update::Card {
+                id,
+                card,
+                can_go_back,
+                excluded,
+            } => self.on_card(ui, id, *card, can_go_back, excluded),
+            Update::PickFailed { id, error } => self.on_pick_failed(ui, id, error),
+            Update::CardImage { id, kind, pixels } => self.on_card_image(ui, id, kind, pixels),
+            Update::CardImdb { id, text, badge } => self.on_card_imdb(ui, id, text, badge),
+            Update::Excluded { title, reason } => self.on_excluded(ui, title, reason),
         }
     }
 
@@ -292,8 +314,15 @@ impl Controller {
 
     pub fn navigate(&mut self, ui: &AppWindow, page: Page) {
         let app = ui.global::<AppState>();
+        let previous = app.get_page();
         app.set_services_sheet_open(false);
         app.set_page(page);
+        // The card's decoded images are kept only while the Pick page shows.
+        if previous == Page::Pick && page != Page::Pick {
+            self.release_card_images(ui);
+        } else if page == Page::Pick && previous != Page::Pick {
+            self.reload_card_images(ui);
+        }
         self.refresh_services(ui);
     }
 
@@ -336,6 +365,7 @@ impl Controller {
             self.release_tiles(ui);
         }
         self.request_logos(ui);
+        self.refresh_idle_message(ui);
     }
 
     fn tile(&self, group: &ServiceGroup, px: u32) -> ServiceTile {
@@ -419,7 +449,8 @@ impl Controller {
     fn request_logos(&mut self, ui: &AppWindow) {
         let tile_px = Self::logo_px(ui, TILE_LOGO);
         let active_px = Self::logo_px(ui, ACTIVE_LOGO);
-        let wanted = self
+        let chip_px = Self::logo_px(ui, CHIP_LOGO);
+        let mut wanted: Vec<(String, u32)> = self
             .tile_rows
             .iter()
             .filter_map(|(_, path)| path.as_ref().map(|p| (p.clone(), tile_px)))
@@ -427,7 +458,11 @@ impl Controller {
                 self.active_rows
                     .iter()
                     .filter_map(|path| path.as_ref().map(|p| (p.clone(), active_px))),
-            );
+            )
+            .collect();
+        if ui.global::<AppState>().get_page() == Page::Pick {
+            wanted.extend(self.pick.chip_logo_paths().map(|p| (p.to_owned(), chip_px)));
+        }
         let mut requests = Vec::new();
         for (path, px) in wanted {
             let key = logo_key(&path, px);
@@ -465,6 +500,9 @@ impl Controller {
                 }
             }
         }
+        if px == Self::logo_px(ui, CHIP_LOGO) {
+            self.place_chip_logo(path, &image);
+        }
     }
 
     /// Updates the tile rows for one service after a selection change, in place.
@@ -497,6 +535,7 @@ impl Controller {
         if self.variants_group.as_deref() == Some(key) {
             self.fill_variants(&group);
         }
+        self.pick_inputs_changed(ui);
     }
 
     pub fn open_variants(&mut self, ui: &AppWindow, key: &str) {
@@ -535,6 +574,7 @@ impl Controller {
         self.save_settings();
         self.fill_variants(&group);
         self.refresh_tile_rows(ui, &key);
+        self.pick_inputs_changed(ui);
     }
 
     pub fn filter_services(&mut self, ui: &AppWindow, text: &str) {
@@ -554,6 +594,7 @@ impl Controller {
         self.save_settings();
         ui.global::<ServicesState>().set_include_free(on);
         ui.global::<SettingsState>().set_include_free(on);
+        self.pick_inputs_changed(ui);
     }
 
     pub fn retry_services(&mut self, ui: &AppWindow) {
@@ -638,6 +679,8 @@ impl Controller {
         app.set_onboarding(false);
         app.set_page(Page::Pick);
         self.refresh_services(ui);
+        // Setup is done, so the first pick can be prepared.
+        self.schedule_prefetch();
     }
 
     // ---- Settings ----------------------------------------------------------------------
@@ -685,6 +728,7 @@ impl Controller {
             self.catalog_error.clear();
             self.refresh_services(ui);
             self.send(Command::LoadCatalog);
+            self.pick_inputs_changed(ui);
         }
     }
 
@@ -713,20 +757,27 @@ impl Controller {
         }
     }
 
-    /// The window moved to a monitor with another scale: logos are re-decoded to stay sharp.
+    /// The window moved to a monitor with another scale: logos and the card's images are
+    /// decoded again to stay sharp.
     pub fn scale_changed(&mut self, ui: &AppWindow) {
         self.logos.clear();
         self.pending_logos.clear();
         self.refresh_services(ui);
+        self.release_card_images(ui);
+        self.reload_card_images(ui);
+        self.send_poster_width(ui);
     }
 
-    pub fn select_default_media(&mut self, _ui: &AppWindow, index: i32) {
-        self.settings.default_media = match index {
-            0 => MediaChoice::Movies,
-            1 => MediaChoice::Series,
-            _ => MediaChoice::Both,
-        };
+    /// The default type also becomes the filter bar's current choice.
+    pub fn select_default_media(&mut self, ui: &AppWindow, index: i32) {
+        let media = pick::media_choice(index);
+        self.settings.default_media = media;
         self.save_settings();
+        if self.pick.media() != media {
+            self.pick.set_media(media);
+            self.pick_inputs_changed(ui);
+        }
+        self.refresh_filter_bar(ui, false);
     }
 
     fn floor_values(&self) -> Vec<u32> {
@@ -756,10 +807,11 @@ impl Controller {
         settings.set_floor_index(index as i32);
     }
 
-    pub fn select_floor(&mut self, _ui: &AppWindow, index: i32) {
+    pub fn select_floor(&mut self, ui: &AppWindow, index: i32) {
         if let Some(&value) = self.floor_values().get(index.max(0) as usize) {
             self.settings.obscurity_floor = value;
             self.save_settings();
+            self.pick_inputs_changed(ui);
         }
     }
 
@@ -789,11 +841,8 @@ impl Controller {
         settings.set_imdb_summary(summary.into());
         settings.set_imdb_message(info.message.clone().unwrap_or_default().into());
         settings.set_imdb_refreshing(info.refreshing);
-        let status = if info.ready {
-            format!("IMDb ratings from {date}")
-        } else {
-            format::IMDB_LOADING.to_owned()
-        };
+        // Shown on the Pick page only while the ratings download for the first time.
+        let status = if info.ready { "" } else { format::IMDB_LOADING };
         ui.global::<AppState>().set_imdb_status(status.into());
     }
 

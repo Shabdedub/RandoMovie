@@ -7,7 +7,7 @@ import { FontIcon } from "widgets.slint";
 import { NavRail } from "nav.slint";
 import { ServicesSheet } from "services.slint";
 import { TokenDialog } from "token.slint";
-import { AppState, Page, TokenForm } from "state.slint";
+import { AppState, Page, PickState, TokenForm } from "state.slint";
 import { PickPage } from "pages/pick.slint";
 import { SearchPage } from "pages/search.slint";
 import { ServicesPage } from "pages/services.slint";
@@ -15,9 +15,11 @@ import { SettingsPage } from "pages/settings.slint";
 import { OnboardingView } from "pages/onboarding.slint";
 
 export { Theme } from "theme.slint";
+export { CardMetrics } from "card.slint";
 export {
-    AppState, OnboardingState, OnboardingStep, Page, ServicesState, ServiceTile, SettingsState,
-    TokenForm, VariantRow,
+    AppState, Exclusion, GenreOption, OnboardingState, OnboardingStep, Page, PickState, PickStatus,
+    ServicesState, ServiceTile, SettingsState, TitleCardData, TokenForm, VariantRow, WatchChip,
+    WatchGroup,
 } from "state.slint";
 
 component OfflineBanner inherits Rectangle {
@@ -61,6 +63,8 @@ export component AppWindow inherits Window {
         Theme.dark = dark;
     }
 
+    // Keys that no focused control used: Esc closes overlays, then leaves a text field;
+    // Ctrl+F opens Search; Space or Enter picks on the Pick page.
     keys := FocusScope {
         key-pressed(event) => {
             if (event.text == Key.Escape) {
@@ -72,6 +76,23 @@ export component AppWindow inherits Window {
                     AppState.close-services-sheet();
                     return accept;
                 }
+                if (!self.has-focus) {
+                    self.focus();
+                    return accept;
+                }
+                return reject;
+            }
+            if (AppState.onboarding || TokenForm.dialog-open || AppState.services-sheet-open) {
+                return reject;
+            }
+            if (event.modifiers.control && !event.modifiers.alt && (event.text == "f" || event.text == "F")) {
+                AppState.navigate(Page.search);
+                return accept;
+            }
+            if (AppState.page == Page.pick && !event.modifiers.control && !event.modifiers.alt
+                && (event.text == Key.Space || event.text == Key.Return)) {
+                PickState.pick();
+                return accept;
             }
             reject
         }

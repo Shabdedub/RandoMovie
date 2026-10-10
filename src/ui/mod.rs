@@ -17,13 +17,27 @@ use slint::winit_030::winit;
 
 use crate::worker::{self, Command, Sink};
 use crate::{
-    AppState, AppWindow, OnboardingState, Page, ServicesState, SettingsState, Theme, TokenForm,
+    AppState, AppWindow, Exclusion, OnboardingState, Page, PickState, ServicesState,
+    SettingsState, Theme, TokenForm,
 };
 use controller::Controller;
 
 thread_local! {
     /// The controller, for updates posted from the worker thread.
     static CONTROLLER: RefCell<Option<Rc<RefCell<Controller>>>> = const { RefCell::new(None) };
+}
+
+/// Runs a deferred action (a timer firing) with the controller and the window. Timers fire
+/// from the event loop, when nothing else holds the controller.
+pub(crate) fn with_controller(weak: &slint::Weak<AppWindow>, action: impl FnOnce(&mut Controller, &AppWindow)) {
+    let Some(ui) = weak.upgrade() else { return };
+    CONTROLLER.with(|slot| {
+        if let Some(controller) = slot.borrow().as_ref()
+            && let Ok(mut controller) = controller.try_borrow_mut()
+        {
+            action(&mut controller, &ui);
+        }
+    });
 }
 
 pub fn run(paths: AppPaths, launched: Instant) -> Result<(), Box<dyn Error>> {
@@ -327,6 +341,31 @@ fn wire_callbacks(ui: &AppWindow, controller: &Rc<RefCell<Controller>>) {
     onboarding.on_next(handler!(controller, weak, |c, ui| c.onboarding_next(&ui)));
     onboarding.on_back(handler!(controller, weak, |c, ui| c.onboarding_back(&ui)));
     onboarding.on_finish(handler!(controller, weak, |c, ui| c.onboarding_finish(&ui)));
+
+    let pick = ui.global::<PickState>();
+    pick.on_pick(handler!(controller, weak, |c, ui| c.pick(&ui)));
+    pick.on_previous(handler!(controller, weak, |c, ui| c.previous(&ui)));
+    pick.on_exclude(handler!(controller, weak, |c, ui, which: Exclusion| c.exclude(&ui, which)));
+    pick.on_media_selected(handler!(controller, weak, |c, ui, index: i32| c
+        .select_media(&ui, index)));
+    pick.on_genre_toggled(handler!(controller, weak, |c, ui, index: i32| c
+        .toggle_genre(&ui, index)));
+    pick.on_genres_cleared(handler!(controller, weak, |c, ui| c.clear_genres(&ui)));
+    pick.on_rating_selected(handler!(controller, weak, |c, ui, index: i32| c
+        .select_rating(&ui, index)));
+    pick.on_votes_selected(handler!(controller, weak, |c, ui, index: i32| c
+        .select_votes(&ui, index)));
+    pick.on_years_edited(handler!(controller, weak, |c, ui, from: slint::SharedString, to: slint::SharedString| c
+        .edit_years(&ui, &from, &to)));
+    pick.on_decade_chosen(handler!(controller, weak, |c, ui, index: i32| c
+        .choose_decade(&ui, index)));
+    pick.on_runtime_selected(handler!(controller, weak, |c, ui, index: i32| c
+        .select_runtime(&ui, index)));
+    pick.on_reset_filters(handler!(controller, weak, |c, ui| c.reset_filters(&ui)));
+    pick.on_run_error_action(handler!(controller, weak, |c, ui| c.run_error_action(&ui)));
+    pick.on_open_where_to_watch(handler!(controller, weak, |c, ui| c.open_where_to_watch(&ui)));
+    pick.on_card_resized(handler!(controller, weak, |c, ui, width: f32, height: f32, poster_width: f32, poster_height: f32| c
+        .card_resized(&ui, width, height, poster_width, poster_height)));
 
     let settings = ui.global::<SettingsState>();
     settings.on_region_selected(handler!(controller, weak, |c, ui, index: i32| c

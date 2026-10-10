@@ -1,0 +1,379 @@
+// The title card shared by Pick and (from phase 4) Search: poster, title, facts, IMDb
+// rating, overview, and where to watch in the region, over a soft blurred backdrop.
+//
+// The software renderer can't clip images to rounded corners, so the worker rounds the
+// poster's and the backdrop's corners itself and decodes both at the exact physical size.
+
+import { ScrollView } from "std-widgets.slint";
+import { Theme, Icons } from "theme.slint";
+import { FontIcon, LinkButton, Pill, Skeleton, TextButton } from "widgets.slint";
+import { TitleCardData, WatchChip, WatchGroup } from "state.slint";
+
+// Sizes shared by the card and the placeholders shown in its place.
+export global CardMetrics {
+    out property <length> padding: 20px;
+    out property <length> gap: 24px;
+    out property <length> poster-radius: 8px;
+
+    // The poster fills the card's height in 24 px steps, so resizing the window rarely needs
+    // a new decode, and leaves the details at least 300 px.
+    public pure function poster-height(card-width: length, card-height: length) -> length {
+        let by-height = floor((card-height - 2 * padding) / 24px) * 24px;
+        let by-width = (card-width - 2 * padding - gap - 300px) * 1.5;
+        return max(168px, min(480px, min(by-height, by-width)));
+    }
+}
+
+// One service under "Where to watch": logo and name.
+component WatchChipView inherits Rectangle {
+    in property <WatchChip> chip;
+    in property <bool> highlighted;
+
+    width: row.preferred-width;
+    height: 32px;
+    border-radius: 16px;
+    background: root.highlighted ? Theme.accent-subtle : Theme.raised;
+    border-width: 1px;
+    border-color: root.highlighted ? Theme.accent : Theme.border;
+    accessible-role: AccessibleRole.text;
+    accessible-label: root.chip.name;
+
+    row := HorizontalLayout {
+        padding-left: 4px;
+        padding-right: 12px;
+        padding-top: 4px;
+        padding-bottom: 4px;
+        spacing: 8px;
+        Rectangle {
+            width: 24px;
+            height: 24px;
+            border-radius: 6px;
+            background: root.chip.logo.width > 0 ? transparent : Theme.hover;
+            Image {
+                source: root.chip.logo;
+                width: 24px;
+                height: 24px;
+                accessible-role: none;
+            }
+        }
+        Text {
+            text: root.chip.name;
+            color: Theme.text;
+            font-size: 13px;
+            vertical-alignment: center;
+            accessible-role: none;
+        }
+    }
+}
+
+export component TitleCardView inherits Rectangle {
+    in property <TitleCardData> data;
+    in property <[WatchGroup]> groups;
+    in property <image> poster;
+    in property <image> backdrop;
+    // Changes with every new title, to reset "More" and the scroll position.
+    in property <int> serial;
+    callback open-link();
+
+    property <length> poster-height: CardMetrics.poster-height(root.width, root.height);
+    property <bool> overview-expanded;
+    property <bool> rent-buy-open;
+    property <bool> available: root.data.verdict-state <= 1;
+
+    changed serial => {
+        root.overview-expanded = false;
+        root.rent-buy-open = false;
+        details.content-y = 0px;
+    }
+
+    border-radius: Theme.radius-card;
+    background: Theme.surface;
+    accessible-role: groupbox;
+    accessible-label: root.data.name;
+
+    // The backdrop's corners are already rounded; the veil keeps text readable over it.
+    Image {
+        source: root.backdrop;
+        width: root.width;
+        height: root.height;
+        image-fit: fill;
+        accessible-role: none;
+    }
+    if root.backdrop.width > 0: Rectangle {
+        border-radius: root.border-radius;
+        background: Theme.backdrop-veil;
+    }
+
+    HorizontalLayout {
+        padding: CardMetrics.padding;
+        spacing: CardMetrics.gap;
+
+        VerticalLayout {
+            alignment: start;
+            Rectangle {
+                width: root.poster-height * 2 / 3;
+                height: root.poster-height;
+                border-radius: CardMetrics.poster-radius;
+                background: Theme.raised;
+                border-width: root.poster.width > 0 ? 0px : 1px;
+                border-color: Theme.border;
+                if root.poster.width == 0: FontIcon {
+                    glyph: Icons.movies;
+                    font-size: 32px;
+                    color: Theme.text-disabled;
+                }
+                Image {
+                    source: root.poster;
+                    width: parent.width;
+                    height: parent.height;
+                    image-fit: fill;
+                    accessible-role: image;
+                    accessible-label: root.poster.width > 0 ? "Poster of " + root.data.name : "No poster";
+                }
+            }
+        }
+
+        details := ScrollView {
+            horizontal-stretch: 1;
+            VerticalLayout {
+                alignment: start;
+                spacing: 10px;
+                padding-right: 16px;
+
+                Text {
+                    text: root.data.name;
+                    font-size: 26px;
+                    font-weight: 600;
+                    color: Theme.text;
+                    wrap: word-wrap;
+                    accessible-role: AccessibleRole.text;
+                }
+
+                HorizontalLayout {
+                    spacing: 10px;
+                    cross-axis-alignment: start;
+                    Pill {
+                        text: root.data.kind;
+                    }
+                    Text {
+                        text: root.data.year == "" ? root.data.facts
+                            : root.data.facts == "" ? root.data.year
+                            : root.data.year + " · " + root.data.facts;
+                        color: Theme.text-muted;
+                        wrap: word-wrap;
+                        horizontal-stretch: 1;
+                    }
+                }
+
+                Rectangle {
+                    accessible-role: AccessibleRole.text;
+                    accessible-label: root.data.imdb;
+                    HorizontalLayout {
+                        spacing: 6px;
+                        alignment: start;
+                        if root.data.imdb-state == 0: FontIcon {
+                            glyph: Icons.star;
+                            font-size: 16px;
+                            color: Theme.star;
+                        }
+                        Text {
+                            text: root.data.imdb;
+                            color: root.data.imdb-state == 0 ? Theme.text : Theme.text-muted;
+                            font-weight: root.data.imdb-state == 0 ? 600 : 400;
+                            vertical-alignment: center;
+                            accessible-role: none;
+                        }
+                    }
+                }
+
+                // Three lines, with "More" when the overview is longer. The button sits inside
+                // this box at a fixed position: as a layout item its size would feed back
+                // into the width the overview wraps at.
+                overview := Rectangle {
+                    property <length> three-lines: three-lines-probe.preferred-height;
+                    property <bool> clamped: full-probe.preferred-height > self.three-lines + 1px;
+                    property <length> text-height: root.overview-expanded || !self.clamped
+                        ? full-probe.preferred-height
+                        : self.three-lines;
+                    height: self.text-height + (self.clamped ? 30px : 0px);
+                    three-lines-probe := Text {
+                        x: 0;
+                        y: 0;
+                        text: "X\nX\nX";
+                        visible: false;
+                        accessible-role: none;
+                    }
+                    full-probe := Text {
+                        x: 0;
+                        y: 0;
+                        width: parent.width;
+                        text: root.data.overview;
+                        wrap: word-wrap;
+                        visible: false;
+                        accessible-role: none;
+                    }
+                    Text {
+                        x: 0;
+                        y: 0;
+                        width: parent.width;
+                        height: overview.text-height;
+                        text: root.data.overview;
+                        color: Theme.text;
+                        wrap: word-wrap;
+                        overflow: elide;
+                        accessible-role: AccessibleRole.text;
+                        accessible-label: root.data.overview;
+                    }
+                    if overview.clamped: TextButton {
+                        x: 0;
+                        y: overview.text-height + 6px;
+                        width: self.min-width;
+                        height: 24px;
+                        text: root.overview-expanded ? "Less" : "More";
+                        accessible-text: root.overview-expanded ? "Show less of the overview" : "Show the whole overview";
+                        clicked => {
+                            root.overview-expanded = !root.overview-expanded;
+                        }
+                    }
+                }
+
+                Rectangle {
+                    height: 1px;
+                    background: Theme.border;
+                }
+
+                // The header carries the link and the attribution TMDB requires beside
+                // availability, so both stay in view without scrolling.
+                FlexboxLayout {
+                    alignment: space-between;
+                    spacing-horizontal: 16px;
+                    spacing-vertical: 4px;
+                    cross-axis-alignment: center;
+                    VerticalLayout {
+                        spacing: 2px;
+                        Text {
+                            text: "Where to watch in " + root.data.region-name;
+                            font-weight: 600;
+                            color: Theme.text;
+                        }
+                        Text {
+                            text: "Streaming data: JustWatch via TMDB";
+                            font-size: Theme.caption;
+                            color: Theme.text-muted;
+                        }
+                    }
+                    if root.data.link != "": LinkButton {
+                        text: "Open where to watch";
+                        clicked => {
+                            root.open-link();
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    cross-axis-alignment: start;
+                    FontIcon {
+                        glyph: root.available ? Icons.completed : Icons.info;
+                        font-size: 16px;
+                        color: root.available ? Theme.success : Theme.text-muted;
+                    }
+                    Text {
+                        text: root.data.verdict;
+                        color: root.available ? Theme.text : Theme.text-muted;
+                        font-weight: root.available ? 600 : 400;
+                        wrap: word-wrap;
+                        horizontal-stretch: 1;
+                    }
+                }
+
+                for group in root.groups: VerticalLayout {
+                    spacing: 6px;
+                    if group.kind != 3: Text {
+                        text: group.label;
+                        font-size: Theme.caption;
+                        color: Theme.text-muted;
+                    }
+                    if group.kind == 3: HorizontalLayout {
+                        alignment: start;
+                        TextButton {
+                            text: root.rent-buy-open ? "Hide rent or buy" : "Rent or buy (" + group.chips.length + ")";
+                            icon: root.rent-buy-open ? Icons.chevron-up : Icons.chevron-down;
+                            clicked => {
+                                root.rent-buy-open = !root.rent-buy-open;
+                            }
+                        }
+                    }
+                    if group.kind != 3 || root.rent-buy-open: FlexboxLayout {
+                        spacing: 6px;
+                        for chip in group.chips: WatchChipView {
+                            chip: chip;
+                            highlighted: group.kind == 0;
+                        }
+                    }
+                }
+
+            }
+        }
+    }
+
+    // The border goes on top, so it stays crisp over the backdrop.
+    Rectangle {
+        border-radius: root.border-radius;
+        border-width: 1px;
+        border-color: Theme.border;
+    }
+}
+
+// Placeholders in the card's shape while a pick is on its way.
+export component TitleCardSkeleton inherits Rectangle {
+    property <length> poster-height: CardMetrics.poster-height(root.width, root.height);
+    border-radius: Theme.radius-card;
+    background: Theme.surface;
+    border-width: 1px;
+    border-color: Theme.border;
+    accessible-role: AccessibleRole.text;
+    accessible-label: "Finding something to watch";
+
+    HorizontalLayout {
+        padding: CardMetrics.padding;
+        spacing: CardMetrics.gap;
+        VerticalLayout {
+            alignment: start;
+            Skeleton {
+                width: root.poster-height * 2 / 3;
+                height: root.poster-height;
+                border-radius: CardMetrics.poster-radius;
+            }
+        }
+        VerticalLayout {
+            alignment: start;
+            cross-axis-alignment: start;
+            spacing: 14px;
+            Skeleton {
+                width: 60%;
+                height: 30px;
+            }
+            Skeleton {
+                width: 45%;
+                height: 18px;
+            }
+            Skeleton {
+                width: 30%;
+                height: 20px;
+            }
+            Skeleton {
+                width: 100%;
+                height: 62px;
+            }
+            Skeleton {
+                width: 50%;
+                height: 18px;
+            }
+            Skeleton {
+                width: 70%;
+                height: 32px;
+            }
+        }
+    }
+}

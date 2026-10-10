@@ -22,16 +22,20 @@ ui/                             Slint UI, compiled into the binary
   app.slint                     window: onboarding or rail + page, side sheet, token dialog, repaint layer
   theme.slint                   design tokens (surfaces, text, accent, radii, type ramp) and icon glyphs
   state.slint                   enums, model structs and the globals Rust reads and writes
-  widgets.slint                 buttons, links, cards, segmented control, inline messages, skeletons
+  widgets.slint                 buttons, links, cards, segmented control, chips, filter buttons, skeletons
+  card.slint                    the title card shared by Pick and Search, and its placeholder
   nav.slint, services.slint, token.slint, pages/*.slint
 src/
   lib.rs                        public modules of the data layer
   main.rs                       binary entry: DPI awareness, logging, then ui::run
   ui/mod.rs                     backend selection, theming, window events, callback wiring  (binary)
   ui/controller.rs              UI-thread state: settings, models, logos, commands to the worker (binary)
+  ui/controller/pick.rs         Pick screen: requests, the card on screen, its images, filter bar (binary)
   worker/mod.rs                 worker thread, current-thread Tokio runtime, command handlers (binary)
+  worker/pick.rs                pick requests, the prepared next pick, session history, exclusions (binary)
   worker/messages.rs            Command (UI to worker) and Update (worker to UI)            (binary)
-  worker/images.rs              decode, scale to exact pixels, round corners, SharedPixelBuffer (binary)
+  worker/images.rs              decode, scale to exact pixels, round corners, blur backdrops (binary)
+  card.rs                       the title card's display text and where-to-watch groups
   error.rs                      Error / ApiError enums, all Clone + Display, no secrets inside
   paths.rs                      %APPDATA%\RandoMovie and %LOCALAPPDATA%\RandoMovie locations
   format.rs                     "★ 7.8 IMDb · 1.2M votes", runtimes, verdict text
@@ -54,6 +58,7 @@ src/
     sampling.rs                 weighted pool choice, random index to (page, offset)
     genres.rs                   unified genre list mapped to movie and TV genre ids
     engine.rs                   pick loop: pools, draw, verify, post-filter, retry budget
+    filters.rs                  filter bar steps, summaries and year-box validation
   store/
     db.rs                       SQLite connection (WAL, 1 MB page cache) and schema
     cache.rs                    HTTP response cache with TTLs, image cache with 30-day TTL and 150 MB LRU cap
@@ -105,7 +110,8 @@ tests/live.rs                   #[ignore]d live checks against TMDB and IMDb
    are on and `free ∪ ads` in R is non-empty. Then apply the IMDb minimums, the exclusions and the
    last 50 picks. Excluded and recent titles are skipped before any request.
 5. On a miss, walk the rest of the page in shuffled order, then draw a new page. After 10 misses the
-   picker returns "Nothing matches, try looser filters".
+   picker returns "Nothing matches, try looser filters". Candidates are verified three at a time
+   (phase 3); the pick is still the first one in this order that passes, so the odds don't change.
 6. The worker prefetches and verifies the next pick after each shown pick, and re-verifies a
    prefetched pick whose data has passed 24 h before showing it.
 
@@ -208,6 +214,43 @@ no `tempfile` (tests use unique folders under the system temp dir).
 - **Region.** Windows' "Country or region" can name a place TMDB has no data for, as on the
   development machine (Sint Maarten). Detection therefore tries it, then the regional format's
   country (en-AU gives AU), then AU, and keeps the first that TMDB lists.
+
+## Pick screen decisions (phase 3)
+
+- **One request at a time, newest wins.** Every Pick or Previous carries an id. The worker
+  remembers the newest id and drops the answer to an older one, so a pick that was replaced
+  (for example by a filter change while it ran) is never shown or recorded. The UI drops
+  answers to ids it no longer waits for.
+- **The prepared next pick.** The worker keeps one background pick, made for an exact
+  `PickRequest` (region, expanded services, free titles, type, genres, IMDb minimums, years,
+  runtime, obscurity floor). It starts once setup is done and the catalog and genres have
+  loaded, after every shown pick, and 0.6 s after the last change to filters or services. It
+  also downloads that title's poster and backdrop into the image cache, at the poster width the
+  UI reports as soon as the Pick page is laid out. "Pick again" uses it
+  only for an identical request. Before it is shown, a title excluded in the meantime is
+  dropped, IMDb ratings that finished downloading are applied, and availability older than
+  24 hours is verified again with `reverify`, the same check the pick loop uses.
+- **History.** The worker keeps this session's picks (up to 100) and a cursor. "Previous" moves
+  the cursor back and reloads the title's details for the current region through the cache,
+  so a region or services change is reflected. A new pick is appended after all others.
+  Exclusions are written to SQLite at once; the last 50 picks come from the database.
+- **Images at exact size.** The card reports its size and its poster's size through Slint
+  `changed` callbacks. The UI converts them to physical pixels and asks for both images; the
+  worker decodes the poster with rounded corners and builds the backdrop: TMDB's `w300`
+  image, cropped to the card's shape at 160 px wide, blurred, scaled to the card's exact size,
+  corners rounded. During a window resize the old images stretch, and exact ones follow 150 ms
+  after resizing stops. Leaving the Pick page releases both.
+- **No flash between cards.** A new card waits up to 250 ms for its poster, so text and poster
+  appear together. An answer that takes longer than 150 ms shows placeholders first.
+- **Layout.** The filter bar and the provider chips use `FlexboxLayout`, stable in Slint 1.18 and
+  backed by taffy, which Slint already links. At the minimum window size the filter bar wraps
+  to two rows and the details scroll beside the poster.
+- **Overview clamp.** A hidden copy of the overview measures its wrapped height, and a hidden
+  three-line string measures three lines. "More" appears only when the first is taller. The
+  button is positioned inside the overview's box: as a layout item, its presence would feed
+  back into the width the text wraps at, which Slint reports as a binding loop.
+- **Keyboard.** Space or Enter picks when no control uses the key, Ctrl+F opens Search, and Esc
+  closes the open panel, then the side sheet, then leaves a text field.
 
 ## Testing
 

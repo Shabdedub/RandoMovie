@@ -1,0 +1,14 @@
+# Build output
+/target
+
+# Local secrets: TMDB credentials live here and must never be committed
+.env
+.env.*
+!.env.example
+
+# Editor and OS clutter
+*.swp
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini

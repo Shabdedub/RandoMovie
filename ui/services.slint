@@ -1,0 +1,376 @@
+// The services panel (used on My Services, in onboarding and in the Pick page side sheet).
+
+import { CheckBox, LineEdit, ScrollView, Switch } from "std-widgets.slint";
+import { Theme, Icons } from "theme.slint";
+import { AppButton, ButtonKind, FontIcon, InlineMessage, Skeleton } from "widgets.slint";
+import { ServicesState, ServiceTile } from "state.slint";
+
+component ServiceTileView inherits Rectangle {
+    in property <ServiceTile> tile;
+    callback toggle();
+    callback open-variants();
+
+    property <bool> on: root.tile.state == 2;
+    property <bool> partial: root.tile.state == 1;
+    property <bool> selected: root.on || root.partial;
+
+    border-radius: Theme.radius-card;
+    background: touch.pressed ? Theme.pressed
+        : touch.has-hover ? Theme.hover
+        : root.selected ? Theme.accent-subtle
+        : Theme.raised;
+    border-width: root.selected ? 2px : 1px;
+    border-color: root.selected ? Theme.accent : Theme.border;
+    animate background { duration: 120ms; }
+
+    function show-variants() {
+        root.open-variants();
+        popup.show();
+    }
+
+    // The checkbox and the plans button are siblings: a button nested inside a checkbox
+    // would be hidden from screen readers.
+    Rectangle {
+        accessible-role: checkbox;
+        accessible-label: root.tile.name;
+        accessible-checkable: true;
+        accessible-checked: root.on;
+        accessible-description: root.partial ? "Some plans selected" : "";
+        accessible-action-default => {
+            root.toggle();
+        }
+
+        focus := FocusScope {
+            focus-on-click: false;
+            key-pressed(event) => {
+                if (event.text == Key.Return || event.text == Key.Space) {
+                    root.toggle();
+                    return accept;
+                }
+                reject
+            }
+            touch := TouchArea {
+                mouse-cursor: MouseCursor.pointer;
+                clicked => {
+                    root.toggle();
+                }
+            }
+        }
+
+        VerticalLayout {
+            padding: 12px;
+            padding-top: 16px;
+            spacing: 10px;
+            alignment: start;
+            HorizontalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 44px;
+                    height: 44px;
+                    border-radius: 10px;
+                    background: root.tile.logo.width > 0 ? transparent : Theme.hover;
+                    Image {
+                        source: root.tile.logo;
+                        width: 44px;
+                        height: 44px;
+                        image-fit: contain;
+                        accessible-role: none;
+                    }
+                }
+            }
+            Text {
+                text: root.tile.name;
+                color: Theme.text;
+                font-size: 13px;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+                overflow: elide;
+                max-height: 36px;
+                accessible-role: none;
+            }
+        }
+
+        if root.selected: Rectangle {
+            x: root.width - 28px;
+            y: 8px;
+            width: 20px;
+            height: 20px;
+            border-radius: 10px;
+            background: Theme.accent;
+            FontIcon {
+                glyph: root.partial ? Icons.dash : Icons.check;
+                font-size: 11px;
+                color: Theme.on-accent;
+            }
+        }
+    }
+
+    if root.tile.variant-count > 1: Rectangle {
+        x: root.width - 32px;
+        y: root.height - 32px;
+        width: 26px;
+        height: 26px;
+        border-radius: 6px;
+        background: variants-touch.has-hover ? Theme.pressed : transparent;
+        accessible-role: button;
+        accessible-label: "Choose " + root.tile.name + " plans";
+        accessible-action-default => {
+            root.show-variants();
+        }
+        variants-focus := FocusScope {
+            focus-on-click: false;
+            key-pressed(event) => {
+                if (event.text == Key.Return || event.text == Key.Space) {
+                    root.show-variants();
+                    return accept;
+                }
+                reject
+            }
+            variants-touch := TouchArea {
+                mouse-cursor: MouseCursor.pointer;
+                clicked => {
+                    root.show-variants();
+                }
+            }
+        }
+        FontIcon {
+            glyph: Icons.chevron-down;
+            font-size: 11px;
+            color: Theme.text-muted;
+        }
+        Rectangle {
+            border-radius: 6px;
+            border-width: 2px;
+            border-color: Theme.accent;
+            visible: variants-focus.has-focus;
+        }
+    }
+
+    Rectangle {
+        x: -3px;
+        y: -3px;
+        width: root.width + 6px;
+        height: root.height + 6px;
+        border-radius: root.border-radius + 3px;
+        border-width: 2px;
+        border-color: Theme.accent;
+        visible: focus.has-focus;
+    }
+
+    popup := PopupWindow {
+        x: 0;
+        y: root.height + 4px;
+        width: max(root.width, 280px);
+        close-policy: PopupClosePolicy.close-on-click-outside;
+        Rectangle {
+            background: Theme.surface;
+            border-radius: Theme.radius-card;
+            border-width: 1px;
+            border-color: Theme.border-strong;
+            VerticalLayout {
+                padding: 12px;
+                spacing: 4px;
+                Text {
+                    text: ServicesState.variants-title;
+                    color: Theme.text;
+                    font-weight: 600;
+                }
+                Text {
+                    text: "Turn individual plans and channels on or off.";
+                    color: Theme.text-muted;
+                    font-size: Theme.caption;
+                    wrap: word-wrap;
+                }
+                for variant in ServicesState.variants: CheckBox {
+                    text: variant.name;
+                    checked: variant.selected;
+                    toggled => {
+                        ServicesState.toggle-variant(variant.id);
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component ServicesPanel inherits VerticalLayout {
+    in property <length> min-tile-width: 124px;
+    property <length> tile-height: 118px;
+    property <length> gap: 12px;
+    spacing: 12px;
+
+    Rectangle {
+        border-radius: Theme.radius-control;
+        background: Theme.raised;
+        border-width: 1px;
+        border-color: Theme.border;
+        HorizontalLayout {
+            padding: 12px;
+            spacing: 12px;
+            VerticalLayout {
+                horizontal-stretch: 1;
+                alignment: center;
+                spacing: 2px;
+                Text {
+                    text: "Include free titles";
+                    color: Theme.text;
+                    font-weight: 600;
+                }
+                Text {
+                    text: ServicesState.free-hint;
+                    color: Theme.text-muted;
+                    font-size: Theme.caption;
+                    wrap: word-wrap;
+                }
+            }
+            Switch {
+                checked <=> ServicesState.include-free;
+                accessible-label: "Include free titles";
+                toggled => {
+                    ServicesState.include-free-toggled(self.checked);
+                }
+            }
+        }
+    }
+
+    HorizontalLayout {
+        spacing: 12px;
+        LineEdit {
+            horizontal-stretch: 1;
+            placeholder-text: "Filter services";
+            accessible-label: "Filter services";
+            text <=> ServicesState.filter;
+            edited(text) => {
+                ServicesState.filter-edited(text);
+            }
+        }
+        Text {
+            text: ServicesState.selected-count == 1 ? "1 selected" : ServicesState.selected-count + " selected";
+            color: Theme.text-muted;
+            vertical-alignment: center;
+        }
+    }
+
+    if ServicesState.error != "": InlineMessage {
+        text: ServicesState.error;
+        action-text: "Retry";
+        action => {
+            ServicesState.retry();
+        }
+    }
+
+    if !ServicesState.loading && ServicesState.error == "" && ServicesState.tiles.length == 0 && ServicesState.filter != "": Text {
+        text: "No services match \"" + ServicesState.filter + "\".";
+        color: Theme.text-muted;
+    }
+
+    if ServicesState.empty-message != "": Text {
+        text: ServicesState.empty-message;
+        color: Theme.text-muted;
+        wrap: word-wrap;
+    }
+
+    scroll := ScrollView {
+        vertical-stretch: 1;
+        min-height: 160px;
+        property <int> columns: max(1, floor((self.visible-width + root.gap) / (root.min-tile-width + root.gap)));
+        property <length> tile-width: (self.visible-width - (self.columns - 1) * root.gap) / self.columns;
+        property <int> skeletons: ServicesState.loading && ServicesState.tiles.length == 0 ? 12 : 0;
+        property <int> count: max(self.skeletons, ServicesState.tiles.length);
+        property <int> rows: ceil(self.count / self.columns);
+        content-width: self.visible-width;
+        content-height: self.rows * (root.tile-height + root.gap) + (ServicesState.hidden-count > 0 ? 48px : 0px);
+
+        for index in scroll.skeletons: Skeleton {
+            x: mod(index, scroll.columns) * (scroll.tile-width + root.gap);
+            y: floor(index / scroll.columns) * (root.tile-height + root.gap);
+            width: scroll.tile-width;
+            height: root.tile-height;
+            border-radius: Theme.radius-card;
+        }
+
+        for tile[index] in ServicesState.tiles: ServiceTileView {
+            x: mod(index, scroll.columns) * (scroll.tile-width + root.gap);
+            y: floor(index / scroll.columns) * (root.tile-height + root.gap);
+            width: scroll.tile-width;
+            height: root.tile-height;
+            tile: tile;
+            toggle => {
+                ServicesState.toggle(tile.key);
+            }
+            open-variants => {
+                ServicesState.open-variants(tile.key);
+            }
+        }
+
+        if ServicesState.hidden-count > 0: AppButton {
+            x: 0;
+            y: scroll.rows * (root.tile-height + root.gap);
+            text: "Show all services (" + ServicesState.hidden-count + " more)";
+            icon: Icons.chevron-down;
+            clicked => {
+                ServicesState.show-all();
+            }
+        }
+    }
+}
+
+// The services panel as a side sheet over the Pick page.
+export component ServicesSheet inherits Rectangle {
+    in property <bool> open;
+    callback close();
+
+    property <float> progress: root.open ? 1 : 0;
+    animate progress { duration: 180ms; easing: ease-out; }
+    visible: self.progress > 0;
+
+    Rectangle {
+        background: Theme.scrim;
+        opacity: root.progress;
+        TouchArea {
+            clicked => {
+                root.close();
+            }
+        }
+    }
+
+    Rectangle {
+        property <length> sheet-width: min(560px, root.width - 96px);
+        x: root.width - self.sheet-width * root.progress;
+        width: self.sheet-width;
+        background: Theme.surface;
+        border-width: 1px;
+        border-color: Theme.border;
+        accessible-role: region;
+        accessible-label: "My Services";
+
+        // Keeps clicks inside the sheet from reaching the scrim.
+        TouchArea { }
+
+        VerticalLayout {
+            padding: 24px;
+            spacing: 16px;
+            HorizontalLayout {
+                spacing: 12px;
+                Text {
+                    text: "My Services";
+                    font-size: Theme.subtitle;
+                    font-weight: 600;
+                    color: Theme.text;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                AppButton {
+                    text: "Done";
+                    kind: ButtonKind.primary;
+                    clicked => {
+                        root.close();
+                    }
+                }
+            }
+            ServicesPanel {
+                min-tile-width: 112px;
+            }
+        }
+    }
+}

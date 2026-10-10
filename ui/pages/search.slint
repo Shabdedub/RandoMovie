@@ -1,0 +1,41 @@
+// Search arrives in phase 4.
+
+import { Theme, Icons } from "../theme.slint";
+import { Card, FontIcon, PageTitle } from "../widgets.slint";
+
+export component SearchPage inherits VerticalLayout {
+    padding: 32px;
+    spacing: 24px;
+
+    PageTitle {
+        title: "Search";
+        subtitle: "Where can I watch it, and is it on my services?";
+    }
+
+    Card {
+        vertical-stretch: 1;
+        VerticalLayout {
+            padding: 32px;
+            spacing: 12px;
+            alignment: center;
+            FontIcon {
+                glyph: Icons.search;
+                font-size: 40px;
+                color: Theme.accent;
+            }
+            Text {
+                text: "Search arrives in phase 4";
+                font-size: Theme.subtitle;
+                font-weight: 600;
+                color: Theme.text;
+                horizontal-alignment: center;
+            }
+            Text {
+                text: "You'll be able to look up any movie or series and see its IMDb rating and where it streams in your region.";
+                color: Theme.text-muted;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+        }
+    }
+}

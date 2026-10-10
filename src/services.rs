@@ -236,6 +236,53 @@ impl ServiceCatalog {
     }
 }
 
+/// Tiles shown before "Show all".
+pub const POPULAR_COUNT: usize = 24;
+
+/// The tiles to show in My Services. A filter shows every service whose name or variant
+/// names contain it. Otherwise the most popular services show, plus any selected service
+/// further down the list, unless `show_all` is set. Returns the tiles and how many are hidden.
+pub fn visible_groups<'a>(
+    catalog: &'a ServiceCatalog,
+    selection: &ServiceSelection,
+    filter: &str,
+    show_all: bool,
+) -> (Vec<&'a ServiceGroup>, usize) {
+    let filter = filter.trim().to_lowercase();
+    if !filter.is_empty() {
+        let matches = catalog
+            .groups
+            .iter()
+            .filter(|g| {
+                g.name.to_lowercase().contains(&filter)
+                    || g.variants.iter().any(|v| v.name.to_lowercase().contains(&filter))
+            })
+            .collect();
+        return (matches, 0);
+    }
+    if show_all || catalog.groups.len() <= POPULAR_COUNT {
+        return (catalog.groups.iter().collect(), 0);
+    }
+    let shown: Vec<&ServiceGroup> = catalog
+        .groups
+        .iter()
+        .enumerate()
+        .filter(|(i, g)| *i < POPULAR_COUNT || selection.state(g) != SelectionState::Off)
+        .map(|(_, g)| g)
+        .collect();
+    let hidden = catalog.groups.len() - shown.len();
+    (shown, hidden)
+}
+
+/// The one-line explanation under "Include free titles".
+pub fn free_titles_hint(region: &str) -> &'static str {
+    if region == "AU" {
+        "Free and ad-supported services such as SBS On Demand, ABC iview, 7plus and 9Now count even if you don't select them."
+    } else {
+        "Free and ad-supported services count even if you don't select them."
+    }
+}
+
 /// On/off state of a tile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectionState {
@@ -426,5 +473,43 @@ mod tests {
         assert_eq!(sel.expand(&catalog), [21, 1796]);
         sel.set_group(&netflix, true);
         assert_eq!(sel.expand(&catalog), [8, 21, 175, 1796]);
+    }
+
+    #[test]
+    fn visible_tiles_follow_popularity_selection_and_filter() {
+        let catalog = au_catalog();
+        let total = catalog.groups.len();
+        let mut sel = ServiceSelection::default();
+
+        let (shown, hidden) = visible_groups(&catalog, &sel, "", false);
+        assert_eq!(shown.len(), POPULAR_COUNT);
+        assert_eq!(hidden, total - POPULAR_COUNT);
+        assert_eq!(shown[0].name, "Netflix");
+
+        // A selected service from the long tail stays visible.
+        let tail = catalog.groups.last().unwrap().clone();
+        sel.set_group(&tail, true);
+        let (shown, hidden) = visible_groups(&catalog, &sel, "", false);
+        assert_eq!(shown.len(), POPULAR_COUNT + 1);
+        assert_eq!(shown.last().unwrap().key, tail.key);
+        assert_eq!(hidden, total - POPULAR_COUNT - 1);
+
+        let (all, hidden) = visible_groups(&catalog, &sel, "", true);
+        assert_eq!((all.len(), hidden), (total, 0));
+
+        // Filters match tile names and variant names, ignoring case.
+        let (found, hidden) = visible_groups(&catalog, &sel, "  PARAMOUNT ", false);
+        assert_eq!(hidden, 0);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].name, "Paramount Plus");
+        let (found, _) = visible_groups(&catalog, &sel, "amazon channel", false);
+        assert!(found.len() > 5, "variants such as 'Hayu Amazon Channel' match");
+        assert!(visible_groups(&catalog, &sel, "zzzz", false).0.is_empty());
+    }
+
+    #[test]
+    fn free_hint_names_local_services() {
+        assert!(free_titles_hint("AU").contains("SBS On Demand"));
+        assert!(!free_titles_hint("GB").contains("SBS"));
     }
 }

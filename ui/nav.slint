@@ -1,0 +1,149 @@
+// The slim navigation rail: Pick, Search, My Services, and Settings at the bottom.
+
+import { Theme, Icons } from "theme.slint";
+import { FontIcon } from "widgets.slint";
+import { Page } from "state.slint";
+
+component NavItem inherits Rectangle {
+    in property <string> icon;
+    in property <string> label;
+    in property <bool> selected;
+    callback activate();
+
+    height: 60px;
+    border-radius: Theme.radius-control;
+    background: touch.pressed ? Theme.pressed
+        : touch.has-hover ? Theme.hover
+        : root.selected ? Theme.raised
+        : transparent;
+    animate background { duration: 120ms; }
+
+    accessible-role: tab;
+    accessible-label: root.label;
+    accessible-item-selectable: true;
+    accessible-item-selected: root.selected;
+    accessible-action-default => {
+        root.activate();
+    }
+
+    focus := FocusScope {
+        focus-on-click: false;
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == Key.Space) {
+                root.activate();
+                return accept;
+            }
+            reject
+        }
+        touch := TouchArea {
+            mouse-cursor: MouseCursor.pointer;
+            clicked => {
+                root.activate();
+            }
+        }
+    }
+
+    // Selection indicator
+    Rectangle {
+        x: 0;
+        y: (root.height - self.height) / 2;
+        width: 3px;
+        height: root.selected ? 20px : 0px;
+        border-radius: 1.5px;
+        background: Theme.accent;
+        animate height { duration: 150ms; easing: ease-out; }
+    }
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 4px;
+        padding-left: 4px;
+        padding-right: 4px;
+        FontIcon {
+            glyph: root.icon;
+            font-size: 20px;
+            color: root.selected ? Theme.accent : Theme.text-muted;
+        }
+        Text {
+            text: root.label;
+            font-size: 11px;
+            horizontal-alignment: center;
+            color: root.selected ? Theme.text : Theme.text-muted;
+            overflow: elide;
+        }
+    }
+
+    Rectangle {
+        border-radius: root.border-radius;
+        border-width: 2px;
+        border-color: Theme.accent;
+        visible: focus.has-focus;
+    }
+}
+
+export component NavRail inherits Rectangle {
+    in property <Page> page;
+    callback navigate(Page);
+
+    width: 88px;
+    background: Theme.surface;
+    accessible-role: navigation;
+    accessible-label: "Main navigation";
+
+    VerticalLayout {
+        padding: 8px;
+        padding-top: 12px;
+        spacing: 4px;
+        HorizontalLayout {
+            alignment: center;
+            padding-bottom: 8px;
+            Image {
+                source: @image-url("../assets/icon-64.png");
+                width: 32px;
+                height: 32px;
+                accessible-role: none;
+            }
+        }
+        NavItem {
+            icon: Icons.shuffle;
+            label: "Pick";
+            selected: root.page == Page.pick;
+            activate => {
+                root.navigate(Page.pick);
+            }
+        }
+        NavItem {
+            icon: Icons.search;
+            label: "Search";
+            selected: root.page == Page.search;
+            activate => {
+                root.navigate(Page.search);
+            }
+        }
+        NavItem {
+            icon: Icons.tv;
+            label: "My Services";
+            selected: root.page == Page.services;
+            activate => {
+                root.navigate(Page.services);
+            }
+        }
+        Rectangle {
+            vertical-stretch: 1;
+        }
+        NavItem {
+            icon: Icons.settings;
+            label: "Settings";
+            selected: root.page == Page.settings;
+            activate => {
+                root.navigate(Page.settings);
+            }
+        }
+    }
+
+    Rectangle {
+        x: root.width - 1px;
+        width: 1px;
+        background: Theme.border;
+    }
+}

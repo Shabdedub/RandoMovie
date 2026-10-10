@@ -1,0 +1,79 @@
+// Design tokens. Rust sets `dark`, the accent pair and the font families at startup and
+// when the theme changes; every colour below follows from them.
+
+export global Theme {
+    in-out property <bool> dark: true;
+    in-out property <color> accent: #6ea8fe;
+    in-out property <color> on-accent: #0b0d12;
+    in-out property <string> font-family: "Segoe UI";
+    in-out property <string> icon-font: "Segoe Fluent Icons";
+
+    // Surfaces
+    out property <color> background: dark ? #0f1115 : #f3f4f7;
+    out property <color> surface: dark ? #171a21 : #ffffff;
+    out property <color> raised: dark ? #1f2430 : #f3f4f7;
+    out property <color> hover: dark ? #262c39 : #e9ecf1;
+    out property <color> pressed: dark ? #2d3443 : #dfe3e9;
+    out property <color> border: dark ? #2a3040 : #dde1e8;
+    out property <color> border-strong: dark ? #3b4356 : #c3c9d4;
+    out property <color> scrim: dark ? #000000a6 : #0f111566;
+
+    // Text (all at least 4.5:1 on every surface)
+    out property <color> text: dark ? #f2f4f8 : #14171f;
+    out property <color> text-muted: dark ? #a3aab8 : #4d5566;
+    out property <color> text-disabled: dark ? #6b7385 : #9aa1ae;
+
+    // Accent and status
+    out property <color> accent-subtle: accent.with-alpha(dark ? 0.14 : 0.12);
+    out property <color> accent-hover: dark ? accent.brighter(0.12) : accent.darker(0.12);
+    out property <color> danger: dark ? #ff8a80 : #b3261e;
+    out property <color> danger-subtle: dark ? #3b1f22 : #fbe9e7;
+    out property <color> warning: dark ? #f2c94c : #7a5000;
+    out property <color> warning-subtle: dark ? #3a3216 : #fff3cd;
+    out property <color> success: dark ? #5fd38d : #1e7f45;
+
+    // Shape: 8 px grid, 12 px cards, 8 px controls
+    out property <length> radius-card: 12px;
+    out property <length> radius-control: 8px;
+    out property <length> space-xs: 4px;
+    out property <length> space-s: 8px;
+    out property <length> space-m: 12px;
+    out property <length> space-l: 16px;
+    out property <length> space-xl: 24px;
+    out property <length> space-xxl: 32px;
+
+    // Windows 11 type ramp
+    out property <length> caption: 12px;
+    out property <length> body: 14px;
+    out property <length> body-large: 18px;
+    out property <length> subtitle: 20px;
+    out property <length> title: 28px;
+}
+
+// Glyphs shared by Segoe Fluent Icons (Windows 11) and Segoe MDL2 Assets (Windows 10).
+export global Icons {
+    out property <string> shuffle: "\u{E8B1}";
+    out property <string> search: "\u{E721}";
+    out property <string> tv: "\u{E7F4}";
+    out property <string> settings: "\u{E713}";
+    out property <string> info: "\u{E946}";
+    out property <string> edit: "\u{E70F}";
+    out property <string> check: "\u{E73E}";
+    out property <string> dash: "\u{E738}";
+    out property <string> close: "\u{E711}";
+    out property <string> chevron-down: "\u{E70D}";
+    out property <string> chevron-right: "\u{E76C}";
+    out property <string> back: "\u{E72B}";
+    out property <string> globe: "\u{E774}";
+    out property <string> refresh: "\u{E72C}";
+    out property <string> delete: "\u{E74D}";
+    out property <string> open-link: "\u{E8A7}";
+    out property <string> warning: "\u{E7BA}";
+    out property <string> error: "\u{EA39}";
+    out property <string> lock: "\u{E72E}";
+    out property <string> color: "\u{E790}";
+    out property <string> filter: "\u{E71C}";
+    out property <string> offline: "\u{E871}";
+    out property <string> library: "\u{E8F1}";
+    out property <string> movies: "\u{E8B2}";
+}

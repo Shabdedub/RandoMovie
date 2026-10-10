@@ -1,0 +1,119 @@
+// The window: onboarding on first run, otherwise the navigation rail and the active page,
+// with the services side sheet and the token dialog as overlays.
+
+import { Palette } from "std-widgets.slint";
+import { Theme, Icons } from "theme.slint";
+import { FontIcon } from "widgets.slint";
+import { NavRail } from "nav.slint";
+import { ServicesSheet } from "services.slint";
+import { TokenDialog } from "token.slint";
+import { AppState, Page, TokenForm } from "state.slint";
+import { PickPage } from "pages/pick.slint";
+import { SearchPage } from "pages/search.slint";
+import { ServicesPage } from "pages/services.slint";
+import { SettingsPage } from "pages/settings.slint";
+import { OnboardingView } from "pages/onboarding.slint";
+
+export { Theme } from "theme.slint";
+export {
+    AppState, OnboardingState, OnboardingStep, Page, ServicesState, ServiceTile, SettingsState,
+    TokenForm, VariantRow,
+} from "state.slint";
+
+component OfflineBanner inherits Rectangle {
+    height: 40px;
+    background: Theme.warning-subtle;
+    accessible-role: banner;
+    accessible-label: "You're offline. Showing saved data. RandoMovie reconnects automatically.";
+    accessible-live-region: AccessibleLiveness.polite;
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 10px;
+        FontIcon {
+            glyph: Icons.offline;
+            color: Theme.warning;
+        }
+        Text {
+            text: "You're offline. Showing saved data. RandoMovie reconnects automatically.";
+            color: Theme.text;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "RandoMovie";
+    icon: @image-url("../assets/icon-64.png");
+    min-width: 800px;
+    min-height: 560px;
+    preferred-width: 1120px;
+    preferred-height: 760px;
+    background: Theme.background;
+    default-font-family: Theme.font-family;
+    default-font-size: Theme.body;
+
+    // Rust resolves System / Dark / Light and calls this; the Fluent widgets follow Palette.
+    public function apply-color-scheme(dark: bool) {
+        Palette.color-scheme = dark ? ColorScheme.dark : ColorScheme.light;
+        Theme.dark = dark;
+    }
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                if (TokenForm.dialog-open) {
+                    TokenForm.cancel();
+                    return accept;
+                }
+                if (AppState.services-sheet-open) {
+                    AppState.close-services-sheet();
+                    return accept;
+                }
+            }
+            reject
+        }
+
+        if AppState.onboarding: OnboardingView { }
+
+        if !AppState.onboarding: HorizontalLayout {
+            NavRail {
+                page: AppState.page;
+                navigate(page) => {
+                    AppState.navigate(page);
+                }
+            }
+            VerticalLayout {
+                if AppState.offline: OfflineBanner { }
+                Rectangle {
+                    vertical-stretch: 1;
+                    if AppState.page == Page.pick: PickPage { }
+                    if AppState.page == Page.search: SearchPage { }
+                    if AppState.page == Page.services: ServicesPage { }
+                    if AppState.page == Page.settings: SettingsPage { }
+                }
+            }
+        }
+
+        ServicesSheet {
+            open: AppState.services-sheet-open && !AppState.onboarding;
+            close => {
+                AppState.close-services-sheet();
+            }
+        }
+
+        if TokenForm.dialog-open: TokenDialog { }
+    }
+
+    // An invisible full-window layer. Flipping it marks the whole window dirty, so the
+    // software renderer repaints everything after Windows discards window content.
+    Rectangle {
+        background: AppState.repaint-tick ? #00000001 : #00000000;
+    }
+
+    init => {
+        keys.focus();
+    }
+}

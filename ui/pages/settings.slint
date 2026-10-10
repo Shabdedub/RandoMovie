@@ -1,0 +1,292 @@
+// Settings, with About as its second tab.
+
+import { AboutSlint, ComboBox, ScrollView, Switch } from "std-widgets.slint";
+import { Theme, Icons } from "../theme.slint";
+import { AppButton, ButtonKind, Card, Divider, LinkButton, Segmented, SettingRow } from "../widgets.slint";
+import { AppState, SettingsState } from "../state.slint";
+
+component SettingsCard inherits Card {
+    VerticalLayout {
+        padding-left: 20px;
+        padding-right: 20px;
+        padding-top: 4px;
+        padding-bottom: 4px;
+        @children
+    }
+}
+
+component GeneralSettings inherits ScrollView {
+    VerticalLayout {
+        spacing: 16px;
+        padding-right: 12px;
+        padding-bottom: 32px;
+
+        SettingsCard {
+            SettingRow {
+                title: "Region";
+                description: "Availability is always checked for one country. Detected from Windows: " + SettingsState.detected-region + ".";
+                ComboBox {
+                    width: 260px;
+                    model: SettingsState.region-names;
+                    current-index <=> SettingsState.region-index;
+                    accessible-label: "Region";
+                    selected => {
+                        SettingsState.region-selected(self.current-index);
+                    }
+                }
+            }
+        }
+
+        SettingsCard {
+            SettingRow {
+                title: "Theme";
+                description: "Dark is the default. System follows your Windows setting.";
+                Segmented {
+                    label: "Theme";
+                    options: ["System", "Dark", "Light"];
+                    selected <=> SettingsState.theme-index;
+                    changed(index) => {
+                        SettingsState.theme-selected(index);
+                    }
+                }
+            }
+        }
+
+        SettingsCard {
+            SettingRow {
+                title: "Default type";
+                description: "Where the Movies / Series / Both filter starts.";
+                Segmented {
+                    label: "Default type";
+                    options: ["Movies", "Series", "Both"];
+                    selected <=> SettingsState.media-index;
+                    changed(index) => {
+                        SettingsState.media-selected(index);
+                    }
+                }
+            }
+            Divider { }
+            SettingRow {
+                title: "Include free titles";
+                description: "Free and ad-supported titles count even when they're not on your services.";
+                Switch {
+                    checked <=> SettingsState.include-free;
+                    accessible-label: "Include free titles";
+                    toggled => {
+                        SettingsState.include-free-toggled(self.checked);
+                    }
+                }
+            }
+            Divider { }
+            SettingRow {
+                title: "Obscurity floor";
+                description: "Random picks need at least this many TMDB votes.";
+                ComboBox {
+                    width: 180px;
+                    model: SettingsState.floor-options;
+                    current-index <=> SettingsState.floor-index;
+                    accessible-label: "Obscurity floor";
+                    selected => {
+                        SettingsState.floor-selected(self.current-index);
+                    }
+                }
+            }
+        }
+
+        SettingsCard {
+            SettingRow {
+                title: "Cache";
+                description: SettingsState.cache-size;
+                AppButton {
+                    text: "Clear cache";
+                    icon: Icons.delete;
+                    busy: SettingsState.clearing-cache;
+                    clicked => {
+                        SettingsState.clear-cache();
+                    }
+                }
+            }
+            Divider { }
+            SettingRow {
+                title: "IMDb ratings";
+                description: SettingsState.imdb-message == "" ? SettingsState.imdb-summary : SettingsState.imdb-summary + ". " + SettingsState.imdb-message;
+                AppButton {
+                    text: "Refresh now";
+                    icon: Icons.refresh;
+                    busy: SettingsState.imdb-refreshing;
+                    clicked => {
+                        SettingsState.refresh-imdb();
+                    }
+                }
+            }
+        }
+
+        SettingsCard {
+            SettingRow {
+                title: "TMDB token";
+                description: SettingsState.token-source;
+                if SettingsState.token-removable: AppButton {
+                    text: "Remove";
+                    kind: ButtonKind.danger;
+                    accessible-text: "Remove the saved token";
+                    clicked => {
+                        SettingsState.remove-token();
+                    }
+                }
+                AppButton {
+                    text: "Change token";
+                    icon: Icons.lock;
+                    clicked => {
+                        SettingsState.change-token();
+                    }
+                }
+            }
+        }
+    }
+}
+
+component AboutView inherits ScrollView {
+    VerticalLayout {
+        spacing: 16px;
+        padding-right: 12px;
+        padding-bottom: 32px;
+
+        Card {
+            VerticalLayout {
+                padding: 24px;
+                spacing: 12px;
+                HorizontalLayout {
+                    spacing: 16px;
+                    alignment: start;
+                    Image {
+                        source: @image-url("../../assets/icon-64.png");
+                        width: 56px;
+                        height: 56px;
+                        accessible-role: none;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 2px;
+                        Text {
+                            text: "RandoMovie";
+                            font-size: Theme.subtitle;
+                            font-weight: 600;
+                            color: Theme.text;
+                        }
+                        Text {
+                            text: "Version " + SettingsState.version;
+                            color: Theme.text-muted;
+                        }
+                    }
+                }
+                Text {
+                    text: "Picks a random movie or series you can stream right now in your region, on your services or for free. For personal, non-commercial use.";
+                    color: Theme.text;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        Card {
+            VerticalLayout {
+                padding: 24px;
+                spacing: 12px;
+                Text {
+                    text: "Data sources";
+                    color: Theme.text;
+                    font-weight: 600;
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    Image {
+                        source: @image-url("../../assets/tmdb-logo.svg");
+                        width: 154px;
+                        height: 20px;
+                        image-fit: contain;
+                        accessible-role: image;
+                        accessible-label: "TMDB logo";
+                    }
+                }
+                Text {
+                    text: "This product uses the TMDB API but is not endorsed or certified by TMDB.";
+                    color: Theme.text;
+                    wrap: word-wrap;
+                }
+                LinkButton {
+                    text: "themoviedb.org";
+                    clicked => {
+                        AppState.open-url("https://www.themoviedb.org");
+                    }
+                }
+                Divider { }
+                Text {
+                    text: "Streaming availability data is provided by JustWatch.";
+                    color: Theme.text;
+                    wrap: word-wrap;
+                }
+                LinkButton {
+                    text: "justwatch.com";
+                    clicked => {
+                        AppState.open-url("https://www.justwatch.com");
+                    }
+                }
+                Divider { }
+                Text {
+                    text: "IMDb ratings: Information courtesy of IMDb (https://www.imdb.com). Used with permission. Ratings come from IMDb's non-commercial datasets, for personal and non-commercial use.";
+                    color: Theme.text;
+                    wrap: word-wrap;
+                }
+                LinkButton {
+                    text: "IMDb non-commercial datasets";
+                    clicked => {
+                        AppState.open-url("https://developer.imdb.com/non-commercial-datasets/");
+                    }
+                }
+            }
+        }
+
+        Card {
+            VerticalLayout {
+                padding: 24px;
+                spacing: 12px;
+                Text {
+                    text: "Built with Slint";
+                    color: Theme.text;
+                    font-weight: 600;
+                }
+                AboutSlint { }
+            }
+        }
+    }
+}
+
+export component SettingsPage inherits VerticalLayout {
+    property <int> tab: 0;
+    padding: 32px;
+    padding-bottom: 0px;
+    spacing: 16px;
+
+    HorizontalLayout {
+        spacing: 16px;
+        Text {
+            text: "Settings";
+            font-size: Theme.title;
+            font-weight: 600;
+            color: Theme.text;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+        Segmented {
+            label: "Settings section";
+            options: ["General", "About"];
+            selected <=> root.tab;
+        }
+    }
+
+    if root.tab == 0: GeneralSettings {
+        vertical-stretch: 1;
+    }
+    if root.tab == 1: AboutView {
+        vertical-stretch: 1;
+    }
+}

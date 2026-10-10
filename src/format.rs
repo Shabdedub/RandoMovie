@@ -2,6 +2,33 @@
 
 use crate::imdb::ImdbStatus;
 use crate::picker::Verdict;
+use crate::util::time::{DAY, civil_from_days};
+
+/// 900 -> "900 bytes", 12_345_678 -> "11.8 MB".
+pub fn bytes(n: u64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    const GB: f64 = MB * 1024.0;
+    let v = n as f64;
+    if v < KB {
+        format!("{n} bytes")
+    } else if v < MB {
+        format!("{:.0} KB", v / KB)
+    } else if v < GB {
+        format!("{:.1} MB", v / MB)
+    } else {
+        format!("{:.2} GB", v / GB)
+    }
+}
+
+/// Unix seconds to "9 Oct 2026" (UTC).
+pub fn day(ts: i64) -> String {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let (year, month, day) = civil_from_days(ts.div_euclid(DAY));
+    format!("{day} {} {year}", MONTHS[(month as usize - 1).min(11)])
+}
 
 pub const IMDB_UNAVAILABLE: &str = "IMDb rating unavailable";
 pub const IMDB_LOADING: &str = "Loading IMDb ratings…";
@@ -114,6 +141,16 @@ mod tests {
         assert_eq!(runtime(120), "2h");
         assert_eq!(seasons(1), "1 season");
         assert_eq!(seasons(4), "4 seasons");
+    }
+
+    #[test]
+    fn sizes_and_days() {
+        assert_eq!(bytes(900), "900 bytes");
+        assert_eq!(bytes(2048), "2 KB");
+        assert_eq!(bytes(12_345_678), "11.8 MB");
+        assert_eq!(bytes(3 * 1024 * 1024 * 1024), "3.00 GB");
+        let ts = crate::util::time::parse_http_date("Fri, 09 Oct 2026 12:51:19 GMT").unwrap();
+        assert_eq!(day(ts), "9 Oct 2026");
     }
 
     #[test]

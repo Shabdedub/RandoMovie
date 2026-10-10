@@ -1,6 +1,6 @@
 [package]
 name = "randomovie"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.92"
 description = "RandoMovie: a lightweight random movie and series picker for Windows"
@@ -9,6 +9,10 @@ publish = false
 [lib]
 name = "randomovie"
 path = "src/lib.rs"
+
+[[bin]]
+name = "RandoMovie"
+path = "src/main.rs"
 
 [dependencies]
 # One async HTTP client. Defaults off: no rustls/aws-lc, no HTTP/2, no proxy detection.
@@ -20,6 +24,29 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151", features = ["raw_value"] }
 flate2 = "1.1.10"
 fastrand = "2.5.0"
+# Native UI: winit backend with only the software renderer. `unstable-winit-030` gives the
+# window-attributes hook (theme before the window exists, so no light title-bar flash) and
+# access to the HWND for the Windows 11 caption colour.
+slint = { version = "1.18.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-software", "accessibility", "unstable-winit-030"] }
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
+windows = { version = "0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_Networking_WinSock",
+    "Win32_Security_Credentials",
+    "Win32_System_Com",
+    "Win32_System_Registry",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[build-dependencies]
+slint-build = "1.18.1"
+winresource = "0.1.31"
 
 [dev-dependencies]
 dotenvy = "0.15.7"
@@ -29,3 +56,5 @@ lto = "fat"
 codegen-units = 1
 strip = true
 opt-level = 3
+# No unwinding tables: smaller exe. The panic hook still logs the panic before exiting.
+panic = "abort"

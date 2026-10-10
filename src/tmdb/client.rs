@@ -113,23 +113,33 @@ pub struct TmdbClient {
     online: watch::Sender<bool>,
 }
 
+/// The app's one HTTP client: SChannel TLS, gzip, 10 s timeouts. Share clones of it; they
+/// use the same connection pool.
+pub fn build_http_client() -> Result<reqwest::Client, ApiError> {
+    reqwest::Client::builder()
+        .user_agent(concat!("RandoMovie/", env!("CARGO_PKG_VERSION")))
+        .timeout(REQUEST_TIMEOUT)
+        .connect_timeout(REQUEST_TIMEOUT)
+        .read_timeout(REQUEST_TIMEOUT)
+        .build()
+        .map_err(|e| ApiError::Decode(format!("HTTP client setup failed: {}", e.without_url())))
+}
+
 impl TmdbClient {
     pub fn new(credential: Credential, store: Arc<Store>) -> Result<TmdbClient, ApiError> {
-        let http = reqwest::Client::builder()
-            .user_agent(concat!("RandoMovie/", env!("CARGO_PKG_VERSION")))
-            .timeout(REQUEST_TIMEOUT)
-            .connect_timeout(REQUEST_TIMEOUT)
-            .read_timeout(REQUEST_TIMEOUT)
-            .build()
-            .map_err(|e| ApiError::Decode(format!("HTTP client setup failed: {}", e.without_url())))?;
-        Ok(TmdbClient {
+        Ok(TmdbClient::with_http(build_http_client()?, credential, store))
+    }
+
+    /// Uses an existing HTTP client, so TMDB and the IMDb download share one pool.
+    pub fn with_http(http: reqwest::Client, credential: Credential, store: Arc<Store>) -> TmdbClient {
+        TmdbClient {
             http,
             credential,
             store,
             limiter: Semaphore::new(MAX_CONCURRENT_REQUESTS),
             inflight: Mutex::new(HashMap::new()),
             online: watch::channel(true).0,
-        })
+        }
     }
 
     /// The shared HTTP client, also used for the IMDb dataset download.

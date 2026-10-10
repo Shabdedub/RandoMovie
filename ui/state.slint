@@ -1,0 +1,104 @@
+// State shared between the Slint UI and Rust. Rust owns the data and sets these
+// properties; the UI reports user actions through the callbacks.
+
+export enum Page { pick, search, services, settings }
+
+export enum OnboardingStep { token, region, services }
+
+// One service tile. `state`: 0 off, 1 some variants on, 2 on.
+export struct ServiceTile {
+    key: string,
+    name: string,
+    logo: image,
+    state: int,
+    variant-count: int,
+}
+
+export struct VariantRow {
+    id: int,
+    name: string,
+    selected: bool,
+}
+
+export global AppState {
+    in property <bool> onboarding;
+    in property <Page> page: Page.pick;
+    in property <bool> services-sheet-open;
+    in property <bool> offline;
+    in property <string> region-name;
+    in property <string> imdb-status;
+    // Flipped by Rust to force a full repaint (see platform::repaint).
+    in property <bool> repaint-tick;
+    callback navigate(Page);
+    callback open-services-sheet();
+    callback close-services-sheet();
+    callback open-url(string);
+}
+
+export global ServicesState {
+    in property <[ServiceTile]> tiles;
+    in property <[ServiceTile]> active;
+    in property <int> active-more;
+    in property <int> hidden-count;
+    in property <int> selected-count;
+    in property <bool> loading;
+    in property <string> error;
+    in property <string> empty-message;
+    in-out property <bool> include-free: true;
+    in property <string> free-hint;
+    in-out property <string> filter;
+    in property <string> variants-title;
+    in property <[VariantRow]> variants;
+    callback toggle(string);
+    callback open-variants(string);
+    callback toggle-variant(int);
+    callback filter-edited(string);
+    callback show-all();
+    callback include-free-toggled(bool);
+    callback retry();
+}
+
+export global TokenForm {
+    in property <bool> checking;
+    in property <string> error;
+    in property <string> notice;
+    in property <bool> dialog-open;
+    callback submit(string);
+    callback cancel();
+}
+
+export global OnboardingState {
+    in property <OnboardingStep> step: OnboardingStep.token;
+    in property <bool> token-step-shown: true;
+    callback next();
+    callback back();
+    callback finish();
+}
+
+export global SettingsState {
+    in property <[string]> region-names;
+    in-out property <int> region-index;
+    in property <string> detected-region;
+    in-out property <int> theme-index;
+    in-out property <int> media-index;
+    in-out property <bool> include-free: true;
+    in property <[string]> floor-options;
+    in-out property <int> floor-index;
+    in property <string> cache-size;
+    in property <bool> clearing-cache;
+    in property <string> imdb-summary;
+    in property <string> imdb-message;
+    in property <bool> imdb-refreshing;
+    in property <string> token-source;
+    in property <bool> token-removable;
+    in property <string> version;
+    callback region-selected(int);
+    callback theme-selected(int);
+    callback media-selected(int);
+    callback include-free-toggled(bool);
+    callback floor-selected(int);
+    callback clear-cache();
+    callback refresh-imdb();
+    callback change-token();
+    callback remove-token();
+}

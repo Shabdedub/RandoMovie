@@ -12,13 +12,26 @@ It was written before coding and is updated when a decision changes.
 ## Crate layout
 
 The crate is a library plus one binary.
-The library holds everything that can be tested without a window; the binary holds the Slint UI.
+The library holds everything that can be tested without a window, including the Windows API
+wrappers. The binary holds the worker thread and the Slint UI.
 
 ```
-Cargo.toml, build.rs            build.rs compiles ui/*.slint (slint-build) and embeds icon + version info
+Cargo.toml, build.rs            build.rs compiles ui/*.slint (slint-build, Fluent) and embeds icon + version info
+assets/                         app icon (.ico and 64 px PNG), TMDB logo (SVG, from TMDB's logo page)
+ui/                             Slint UI, compiled into the binary
+  app.slint                     window: onboarding or rail + page, side sheet, token dialog, repaint layer
+  theme.slint                   design tokens (surfaces, text, accent, radii, type ramp) and icon glyphs
+  state.slint                   enums, model structs and the globals Rust reads and writes
+  widgets.slint                 buttons, links, cards, segmented control, inline messages, skeletons
+  nav.slint, services.slint, token.slint, pages/*.slint
 src/
   lib.rs                        public modules of the data layer
-  main.rs                       binary entry: logging, settings, window, worker, event loop   (phase 2)
+  main.rs                       binary entry: DPI awareness, logging, then ui::run
+  ui/mod.rs                     backend selection, theming, window events, callback wiring  (binary)
+  ui/controller.rs              UI-thread state: settings, models, logos, commands to the worker (binary)
+  worker/mod.rs                 worker thread, current-thread Tokio runtime, command handlers (binary)
+  worker/messages.rs            Command (UI to worker) and Update (worker to UI)            (binary)
+  worker/images.rs              decode, scale to exact pixels, round corners, SharedPixelBuffer (binary)
   error.rs                      Error / ApiError enums, all Clone + Display, no secrets inside
   paths.rs                      %APPDATA%\RandoMovie and %LOCALAPPDATA%\RandoMovie locations
   format.rs                     "★ 7.8 IMDb · 1.2M votes", runtimes, verdict text
@@ -46,19 +59,16 @@ src/
     cache.rs                    HTTP response cache with TTLs, image cache with 30-day TTL and 150 MB LRU cap
     history.rs                  pick history and "Seen it" / "Not interested" exclusions
     settings.rs                 settings.json load/save, versioned migration, sanitising
-  platform/                     (phase 2)
-    region.rs                   GetUserDefaultGeoName with AU fallback
+  platform/                     Windows APIs (windows crate)
+    region.rs                   country: GetUserDefaultGeoName, then the regional format, then AU
     credentials.rs              Windows Credential Manager read/write/delete
-    theme.rs                    dark title bar via DwmSetWindowAttribute, Windows accent colour
-    shell.rs                    open the TMDB watch page in the default browser (ShellExecuteW)
+    theme.rs                    light/dark preference, accent palette with WCAG checks, title bar (DWM)
+    monitor.rs                  per-monitor DPI, primary work area, is a saved position on screen
+    repaint.rs                  GetUpdateRect, for the software-renderer repaint workaround
+    shell.rs                    open web links in the default browser (ShellExecuteW)
     network.rs                  connectivity-change notification to leave offline mode without polling
-  worker/                       (phase 2)
-    mod.rs                      worker thread, current-thread Tokio runtime, command loop
-    commands.rs                 Command (UI to worker) and Update (worker to UI) enums
-    images.rs                   decode + downscale to exact pixels, blurred backdrop, SharedPixelBuffer
-  ui/                           (phase 2+, binary only)
-    *.slint                     app, theme tokens, nav rail, pick, title card, search, services, settings, about
-    bridge.rs                   applies Updates to Slint properties and models on the UI thread
+    fonts.rs                    Segoe UI Variable or Segoe UI, Segoe Fluent Icons or MDL2 Assets
+    dialog.rs                   error box for failures before the window exists
 examples/smoke.rs               prints one AU pick and one AU search result from the live APIs
 tests/fixtures/*.json           recorded TMDB responses (no credentials inside)
 tests/live.rs                   #[ignore]d live checks against TMDB and IMDb
@@ -147,7 +157,7 @@ Picks are never verified with stale availability.
 
 | Crate | Version | Features | Why |
 |---|---|---|---|
-| `slint` | 1.18.1 | `std`, `compat-1-2`, `backend-winit`, `renderer-software`, `accessibility`, `raw-window-handle-06` | Native UI with the software renderer, accessibility, and the window handle for title-bar theming |
+| `slint` | 1.18.1 | `std`, `compat-1-2`, `backend-winit`, `renderer-software`, `accessibility`, `unstable-winit-030` | Native UI with the software renderer and accessibility; the winit hook themes the window before it exists and exposes the HWND and window events |
 | `slint-build` | 1.18.1 | (build) | Compiles `.slint` files at build time with the Fluent style |
 | `reqwest` | 0.13.5 | no defaults; `json`, `gzip`, `native-tls` | One async HTTP client using SChannel through native-tls, so no bundled crypto |
 | `tokio` | 1.53.2 | `rt`, `sync`, `time`, `macros` | Current-thread runtime, semaphore, OnceCell, channels and timers for the worker |
@@ -157,17 +167,47 @@ Picks are never verified with stale availability.
 | `flate2` | 1.1.10 | default (miniz_oxide) | Streaming gzip decompression of the IMDb dataset |
 | `fastrand` | 2.5.0 | default | Small seeded RNG for uniform picks and shuffles |
 | `image` | 0.25.10 | no defaults; `jpeg`, `png` | Decode and resize posters and logos; no rayon threads, no unused codecs |
-| `windows` | 0.62.2 | `Win32_Foundation`, `Win32_Globalization`, `Win32_Security_Credentials`, `Win32_Graphics_Dwm`, `Win32_UI_Shell`, `Win32_UI_WindowsAndMessaging`, `Win32_System_Registry`, `Win32_NetworkManagement_IpHelper`, `Win32_Networking_WinSock` | Region, Credential Manager, dark title bar, accent colour, opening links, connectivity events |
-| `raw-window-handle` | 0.6.2 | default | Reads the HWND from Slint's window handle for `DwmSetWindowAttribute` |
+| `windows` | 0.62.2 | `Win32_Foundation`, `Win32_Globalization`, `Win32_Graphics_Dwm`, `Win32_Graphics_Gdi`, `Win32_NetworkManagement_IpHelper`, `Win32_Networking_WinSock`, `Win32_Security_Credentials`, `Win32_System_Com`, `Win32_System_Registry`, `Win32_UI_HiDpi`, `Win32_UI_Shell`, `Win32_UI_WindowsAndMessaging` | Region, Credential Manager, title bar, accent colour, monitors and DPI, repaint detection, opening links, connectivity events, error box |
 | `winresource` | 0.1.31 | (build) | Embeds the icon and version info from Cargo metadata into the exe |
 | `dotenvy` | 0.15.7 | (dev) | Loads `.env` for tests and the smoke example only |
 
 Phase 1 uses only reqwest, tokio, rusqlite, serde, serde_json, flate2 and fastrand.
-The UI and platform crates arrive in phase 2, and `image` arrives in phase 3.
+Slint, `windows` and `image` arrive in phase 2 (`image` decodes the service logos).
+The HWND comes from winit's own `raw_window_handle` re-export, so no separate crate is needed.
+
+The release profile adds `panic = "abort"` to the four required settings. Unwinding tables made
+up about 4.4 MB of the exe; the panic hook still writes the panic to the log before exiting.
 
 Not used on purpose: no `chrono` (std time plus a small formatter), no `thiserror` or `anyhow`
 (small manual error enums), no `log` facade (one file logger), no `futures` (tokio covers it),
 no `tempfile` (tests use unique folders under the system temp dir).
+
+## UI shell decisions (phase 2)
+
+- **State ownership.** The UI thread owns the settings and the view state and updates the screen at
+  once. Every change is sent to the worker, which writes `settings.json` atomically. The UI thread
+  reads `settings.json` once at launch, before the window exists, to render from cached settings.
+- **Theme.** Rust resolves System / Dark / Light and sets `Palette.color-scheme` and the design
+  tokens. The winit attributes hook sets the window theme before creation, so the title bar is
+  never the wrong colour, and `DwmSetWindowAttribute` matches the Windows 11 caption to the window.
+  In System mode, winit's theme events switch the app live.
+- **Accent.** The Windows accent palette from the registry is used when the shade WinUI would use
+  passes 4.5:1 contrast both against the surfaces and for text drawn on it; otherwise a built-in
+  blue is used.
+- **Images.** The worker decodes each logo, scales it to the exact physical pixels shown, rounds
+  its corners (the software renderer can't clip to rounded rectangles) and sends a
+  `SharedPixelBuffer`. Tile logos are dropped from memory whenever no screen shows the tiles.
+- **Window.** The first launch fits the default 1120 × 760 window to the primary monitor's work
+  area. Size, position and maximized state are restored only if the title bar would be on a
+  connected monitor.
+- **Repaint workaround.** Slint 1.18.1's software renderer presents only the regions it changed, so
+  areas Windows discards can stay unpainted (slint-ui/slint#13652, #13537). When a redraw arrives
+  with a system update region (`GetUpdateRect`), or the window is uncovered, the app flips an
+  invisible full-window layer to force a full repaint. This mirrors the upstream fix,
+  slint-ui/slint#13568, which is merged but not yet released; remove it once a release has it.
+- **Region.** Windows' "Country or region" can name a place TMDB has no data for, as on the
+  development machine (Sint Maarten). Detection therefore tries it, then the regional format's
+  country (en-AU gives AU), then AU, and keeps the first that TMDB lists.
 
 ## Testing
 

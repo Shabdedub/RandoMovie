@@ -1,0 +1,112 @@
+// Asking for the TMDB token: first-run step and the "Change token" / 401 dialog.
+
+import { LineEdit } from "std-widgets.slint";
+import { Theme, Icons } from "theme.slint";
+import { AppButton, ButtonKind, FontIcon, InlineMessage, LinkButton } from "widgets.slint";
+import { AppState, TokenForm } from "state.slint";
+
+export component TokenPanel inherits VerticalLayout {
+    in property <bool> show-cancel;
+    spacing: 16px;
+
+    HorizontalLayout {
+        alignment: start;
+        Rectangle {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            background: Theme.accent-subtle;
+            FontIcon {
+                glyph: Icons.lock;
+                font-size: 22px;
+                color: Theme.accent;
+            }
+        }
+    }
+    Text {
+        text: "Connect to TMDB";
+        font-size: Theme.title;
+        font-weight: 600;
+        color: Theme.text;
+    }
+    Text {
+        text: "RandoMovie gets movie details and streaming availability from TMDB. Paste the API Read Access Token from your TMDB account. It's kept in Windows Credential Manager, never in a file.";
+        color: Theme.text-muted;
+        wrap: word-wrap;
+    }
+    if TokenForm.notice != "": InlineMessage {
+        text: TokenForm.notice;
+        is-error: false;
+    }
+    LinkButton {
+        text: "Get a token at themoviedb.org";
+        clicked => {
+            AppState.open-url("https://www.themoviedb.org/settings/api");
+        }
+    }
+    input := LineEdit {
+        input-type: InputType.password;
+        placeholder-text: "API Read Access Token";
+        enabled: !TokenForm.checking;
+        accessible-label: "TMDB API Read Access Token";
+        accepted(text) => {
+            if (text != "" && !TokenForm.checking) {
+                TokenForm.submit(text);
+            }
+        }
+    }
+    if TokenForm.error != "": InlineMessage {
+        text: TokenForm.error;
+    }
+    HorizontalLayout {
+        alignment: end;
+        spacing: 8px;
+        if root.show-cancel: AppButton {
+            text: "Cancel";
+            enabled: !TokenForm.checking;
+            clicked => {
+                TokenForm.cancel();
+            }
+        }
+        AppButton {
+            text: TokenForm.checking ? "Checking" : "Continue";
+            kind: ButtonKind.primary;
+            busy: TokenForm.checking;
+            enabled: input.text != "";
+            clicked => {
+                TokenForm.submit(input.text);
+            }
+        }
+    }
+
+    init => {
+        input.focus();
+    }
+}
+
+export component TokenDialog inherits Rectangle {
+    background: Theme.scrim;
+    // Block clicks to the app behind the dialog.
+    TouchArea { }
+    // Layouts size the card from its content, including wrapped text.
+    VerticalLayout {
+        alignment: center;
+        padding: 32px;
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: min(560px, root.width - 64px);
+                background: Theme.surface;
+                border-radius: Theme.radius-card;
+                border-width: 1px;
+                border-color: Theme.border-strong;
+                accessible-role: region;
+                accessible-label: "Connect to TMDB";
+                TokenPanel {
+                    padding: 24px;
+                    show-cancel: true;
+                }
+            }
+        }
+    }
+}

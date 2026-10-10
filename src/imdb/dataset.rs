@@ -120,6 +120,9 @@ impl ImdbRatings {
     /// lookup answers `Loading` until `refresh` succeeds.
     pub fn open(dir: &Path) -> ImdbRatings {
         let _ = fs::create_dir_all(dir);
+        // Leftovers from a rebuild that was interrupted (for example by closing the app).
+        let _ = fs::remove_dir_all(dir.join(BUILD_DIR));
+        let _ = fs::remove_file(dir.join(NEW_INDEX_FILE));
         let reader = match IndexReader::open(&dir.join(INDEX_FILE)) {
             Ok(reader) => Some(reader),
             Err(e) if e.kind() == io::ErrorKind::NotFound => None,

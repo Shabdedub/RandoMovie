@@ -7,6 +7,8 @@ pub mod imdb;
 pub mod media;
 pub mod paths;
 pub mod picker;
+#[cfg(windows)]
+pub mod platform;
 pub mod services;
 pub mod store;
 pub mod tmdb;

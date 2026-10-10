@@ -1,0 +1,16 @@
+import { PageTitle } from "../widgets.slint";
+import { ServicesPanel } from "../services.slint";
+
+export component ServicesPage inherits VerticalLayout {
+    padding: 32px;
+    spacing: 16px;
+
+    PageTitle {
+        title: "My Services";
+        subtitle: "Turn on the services you pay for. Picks only come from these, plus free titles if you allow them. Changes save instantly.";
+    }
+
+    ServicesPanel {
+        vertical-stretch: 1;
+    }
+}

@@ -1,0 +1,161 @@
+// First run: token (if none is found), region, services.
+
+import { ComboBox } from "std-widgets.slint";
+import { Theme, Icons } from "../theme.slint";
+import { AppButton, ButtonKind, Card, FontIcon } from "../widgets.slint";
+import { TokenPanel } from "../token.slint";
+import { ServicesPanel } from "../services.slint";
+import { OnboardingState, OnboardingStep, SettingsState } from "../state.slint";
+
+component RegionStep inherits VerticalLayout {
+    padding: 32px;
+    spacing: 16px;
+    HorizontalLayout {
+        alignment: start;
+        Rectangle {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            background: Theme.accent-subtle;
+            FontIcon {
+                glyph: Icons.globe;
+                font-size: 22px;
+                color: Theme.accent;
+            }
+        }
+    }
+    Text {
+        text: "Where do you watch?";
+        font-size: Theme.title;
+        font-weight: 600;
+        color: Theme.text;
+    }
+    Text {
+        text: "Streaming catalogues differ by country, so every pick is checked against yours.";
+        color: Theme.text-muted;
+        wrap: word-wrap;
+    }
+    ComboBox {
+        model: SettingsState.region-names;
+        current-index <=> SettingsState.region-index;
+        accessible-label: "Region";
+        selected => {
+            SettingsState.region-selected(self.current-index);
+        }
+    }
+    Text {
+        text: "Detected from Windows: " + SettingsState.detected-region;
+        color: Theme.text-muted;
+        font-size: Theme.caption;
+    }
+    HorizontalLayout {
+        alignment: end;
+        spacing: 8px;
+        if OnboardingState.token-step-shown: AppButton {
+            text: "Back";
+            clicked => {
+                OnboardingState.back();
+            }
+        }
+        AppButton {
+            text: "Continue";
+            kind: ButtonKind.primary;
+            clicked => {
+                OnboardingState.next();
+            }
+        }
+    }
+}
+
+component ServicesStep inherits VerticalLayout {
+    spacing: 16px;
+    Text {
+        text: "Your streaming services";
+        font-size: Theme.title;
+        font-weight: 600;
+        color: Theme.text;
+    }
+    Text {
+        text: "Select the services you subscribe to. You can change them any time from My Services.";
+        color: Theme.text-muted;
+        wrap: word-wrap;
+    }
+    Card {
+        vertical-stretch: 1;
+        ServicesPanel {
+            padding: 20px;
+        }
+    }
+    HorizontalLayout {
+        alignment: end;
+        spacing: 8px;
+        AppButton {
+            text: "Back";
+            clicked => {
+                OnboardingState.back();
+            }
+        }
+        AppButton {
+            text: "Start";
+            kind: ButtonKind.primary;
+            clicked => {
+                OnboardingState.finish();
+            }
+        }
+    }
+}
+
+export component OnboardingView inherits Rectangle {
+    property <bool> with-token: OnboardingState.token-step-shown;
+    property <int> step-count: self.with-token ? 3 : 2;
+    property <int> step-number: OnboardingState.step == OnboardingStep.token ? 1
+        : OnboardingState.step == OnboardingStep.region ? (self.with-token ? 2 : 1)
+        : (self.with-token ? 3 : 2);
+
+    background: Theme.background;
+
+    HorizontalLayout {
+        alignment: center;
+        padding: 32px;
+        VerticalLayout {
+            width: min(760px, root.width - 64px);
+            spacing: 24px;
+            alignment: OnboardingState.step == OnboardingStep.services ? LayoutAlignment.stretch : LayoutAlignment.center;
+
+            HorizontalLayout {
+                spacing: 12px;
+                Image {
+                    source: @image-url("../../assets/icon-64.png");
+                    width: 32px;
+                    height: 32px;
+                    accessible-role: none;
+                }
+                Text {
+                    text: "RandoMovie";
+                    font-size: Theme.subtitle;
+                    font-weight: 600;
+                    color: Theme.text;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                Text {
+                    text: "Step " + root.step-number + " of " + root.step-count;
+                    color: Theme.text-muted;
+                    vertical-alignment: center;
+                }
+            }
+
+            if OnboardingState.step == OnboardingStep.token: Card {
+                TokenPanel {
+                    padding: 32px;
+                }
+            }
+            if OnboardingState.step == OnboardingStep.region: Card {
+                RegionStep { }
+            }
+            if OnboardingState.step == OnboardingStep.services: ServicesStep {
+                vertical-stretch: 1;
+            }
+        }
+    }
+}

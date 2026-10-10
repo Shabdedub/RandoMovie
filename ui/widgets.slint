@@ -1,0 +1,358 @@
+// Small building blocks styled with the design tokens. Interactive ones are keyboard
+// operable (Tab to focus, Space or Enter to activate) and show a focus ring only when
+// focus came from the keyboard.
+
+import { Spinner } from "std-widgets.slint";
+import { Theme, Icons } from "theme.slint";
+
+export component FontIcon inherits Text {
+    in property <string> glyph;
+    text: glyph;
+    font-family: Theme.icon-font;
+    font-size: 16px;
+    color: Theme.text;
+    horizontal-alignment: center;
+    vertical-alignment: center;
+    // Icons keep their size in layouts; text beside them takes the spare room.
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    accessible-role: none;
+}
+
+export enum ButtonKind { primary, secondary, subtle, danger }
+
+export component AppButton inherits Rectangle {
+    in property <string> text;
+    in property <string> icon;
+    in property <ButtonKind> kind: ButtonKind.secondary;
+    in property <bool> enabled: true;
+    in property <bool> busy;
+    in property <string> accessible-text: root.text;
+    callback clicked();
+
+    property <bool> active: root.enabled && !root.busy;
+    property <bool> primary: root.kind == ButtonKind.primary;
+    property <color> ink: !root.enabled ? Theme.text-disabled
+        : root.primary ? Theme.on-accent
+        : root.kind == ButtonKind.danger ? Theme.danger
+        : Theme.text;
+
+    min-width: max(32px, content.min-width);
+    min-height: 32px;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    border-radius: Theme.radius-control;
+    border-width: root.kind == ButtonKind.secondary ? 1px : 0px;
+    border-color: Theme.border-strong;
+    background: !root.enabled ? (root.primary ? Theme.hover : transparent)
+        : touch.pressed ? (root.primary ? Theme.accent.darker(0.15) : Theme.pressed)
+        : touch.has-hover ? (root.primary ? Theme.accent-hover : Theme.hover)
+        : root.primary ? Theme.accent
+        : root.kind == ButtonKind.secondary ? Theme.raised
+        : transparent;
+    animate background { duration: 120ms; }
+
+    accessible-role: button;
+    accessible-label: root.accessible-text;
+    accessible-enabled: root.active;
+    accessible-action-default => {
+        if (root.active) {
+            root.clicked();
+        }
+    }
+
+    focus := FocusScope {
+        enabled: root.active;
+        focus-on-click: false;
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == Key.Space) {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+        touch := TouchArea {
+            enabled: root.active;
+            mouse-cursor: root.active ? MouseCursor.pointer : MouseCursor.default;
+            clicked => {
+                root.clicked();
+            }
+        }
+    }
+
+    content := HorizontalLayout {
+        padding-left: root.text == "" ? 8px : 14px;
+        padding-right: root.text == "" ? 8px : 14px;
+        spacing: 8px;
+        alignment: center;
+        if root.busy: Spinner {
+            width: 16px;
+            height: 16px;
+            indeterminate: true;
+        }
+        if root.icon != "" && !root.busy: FontIcon {
+            glyph: root.icon;
+            color: root.ink;
+            font-size: 14px;
+        }
+        if root.text != "": Text {
+            text: root.text;
+            color: root.ink;
+            font-weight: root.primary ? 600 : 400;
+            vertical-alignment: center;
+        }
+    }
+
+    Rectangle {
+        x: -3px;
+        y: -3px;
+        width: root.width + 6px;
+        height: root.height + 6px;
+        border-radius: root.border-radius + 3px;
+        border-width: 2px;
+        border-color: Theme.accent;
+        visible: focus.has-focus;
+    }
+}
+
+// A text link that opens in the browser (the caller handles `clicked`).
+export component LinkButton inherits Rectangle {
+    in property <string> text;
+    callback clicked();
+    min-width: row.min-width;
+    min-height: 24px;
+    horizontal-stretch: 0;
+    border-radius: 4px;
+    accessible-role: button;
+    accessible-label: root.text + " (opens in your browser)";
+    accessible-action-default => {
+        root.clicked();
+    }
+    focus := FocusScope {
+        focus-on-click: false;
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == Key.Space) {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+        touch := TouchArea {
+            mouse-cursor: MouseCursor.pointer;
+            clicked => {
+                root.clicked();
+            }
+        }
+    }
+    row := HorizontalLayout {
+        spacing: 6px;
+        alignment: start;
+        Text {
+            text: root.text;
+            color: touch.has-hover ? Theme.accent-hover : Theme.accent;
+            vertical-alignment: center;
+        }
+        FontIcon {
+            glyph: Icons.open-link;
+            font-size: 12px;
+            color: touch.has-hover ? Theme.accent-hover : Theme.accent;
+        }
+    }
+    Rectangle {
+        x: -3px;
+        y: -1px;
+        width: root.width + 6px;
+        height: root.height + 2px;
+        border-radius: 4px;
+        border-width: 2px;
+        border-color: Theme.accent;
+        visible: focus.has-focus;
+    }
+}
+
+export component Card inherits Rectangle {
+    background: Theme.surface;
+    border-radius: Theme.radius-card;
+    border-width: 1px;
+    border-color: Theme.border;
+}
+
+export component PageTitle inherits VerticalLayout {
+    in property <string> title;
+    in property <string> subtitle;
+    spacing: 4px;
+    Text {
+        text: root.title;
+        font-size: Theme.title;
+        font-weight: 600;
+        color: Theme.text;
+        accessible-role: AccessibleRole.text;
+    }
+    if root.subtitle != "": Text {
+        text: root.subtitle;
+        color: Theme.text-muted;
+        wrap: word-wrap;
+    }
+}
+
+// A labelled row in a settings card; the control goes in as a child.
+export component SettingRow inherits HorizontalLayout {
+    in property <string> title;
+    in property <string> description;
+    spacing: 16px;
+    padding-top: 12px;
+    padding-bottom: 12px;
+    VerticalLayout {
+        alignment: center;
+        spacing: 2px;
+        horizontal-stretch: 1;
+        Text {
+            text: root.title;
+            color: Theme.text;
+            wrap: word-wrap;
+        }
+        if root.description != "": Text {
+            text: root.description;
+            color: Theme.text-muted;
+            font-size: Theme.caption;
+            wrap: word-wrap;
+        }
+    }
+    HorizontalLayout {
+        alignment: end;
+        spacing: 8px;
+        horizontal-stretch: 0;
+        @children
+    }
+}
+
+export component Divider inherits Rectangle {
+    height: 1px;
+    background: Theme.border;
+}
+
+// A row of mutually exclusive choices. Left and Right arrows move the selection.
+export component Segmented inherits Rectangle {
+    in property <[string]> options;
+    in-out property <int> selected;
+    in property <string> label;
+    callback changed(int);
+
+    height: 32px;
+    min-width: row.min-width;
+    horizontal-stretch: 0;
+    border-radius: Theme.radius-control;
+    background: Theme.raised;
+    border-width: 1px;
+    border-color: Theme.border;
+    accessible-role: radio-group;
+    accessible-label: root.label;
+
+    function choose(index: int) {
+        if (index >= 0 && index < root.options.length && index != root.selected) {
+            root.selected = index;
+            root.changed(index);
+        }
+    }
+
+    focus := FocusScope {
+        focus-on-click: false;
+        key-pressed(event) => {
+            if (event.text == Key.RightArrow) {
+                root.choose(root.selected + 1);
+                return accept;
+            }
+            if (event.text == Key.LeftArrow) {
+                root.choose(root.selected - 1);
+                return accept;
+            }
+            reject
+        }
+    }
+
+    row := HorizontalLayout {
+        padding: 2px;
+        spacing: 2px;
+        for option[index] in root.options: Rectangle {
+            min-width: label-text.min-width + 28px;
+            border-radius: Theme.radius-control - 2px;
+            background: index == root.selected ? Theme.surface
+                : option-touch.has-hover ? Theme.hover
+                : transparent;
+            border-width: index == root.selected ? 1px : 0px;
+            border-color: Theme.border-strong;
+            accessible-role: radio-button;
+            accessible-label: option;
+            accessible-checked: index == root.selected;
+            accessible-action-default => {
+                root.choose(index);
+            }
+            label-text := Text {
+                text: option;
+                color: index == root.selected ? Theme.text : Theme.text-muted;
+                font-weight: index == root.selected ? 600 : 400;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            option-touch := TouchArea {
+                mouse-cursor: MouseCursor.pointer;
+                clicked => {
+                    root.choose(index);
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        x: -3px;
+        y: -3px;
+        width: root.width + 6px;
+        height: root.height + 6px;
+        border-radius: root.border-radius + 3px;
+        border-width: 2px;
+        border-color: Theme.accent;
+        visible: focus.has-focus;
+    }
+}
+
+// An inline, non-blocking message with an optional action such as "Retry".
+export component InlineMessage inherits Rectangle {
+    in property <string> text;
+    in property <bool> is-error: true;
+    in property <string> action-text;
+    callback action();
+    border-radius: Theme.radius-control;
+    background: root.is-error ? Theme.danger-subtle : Theme.warning-subtle;
+    accessible-role: AccessibleRole.text;
+    accessible-label: root.text;
+    accessible-live-region: AccessibleLiveness.polite;
+    HorizontalLayout {
+        padding: 12px;
+        spacing: 12px;
+        FontIcon {
+            glyph: root.is-error ? Icons.error : Icons.warning;
+            color: root.is-error ? Theme.danger : Theme.warning;
+            vertical-alignment: top;
+        }
+        Text {
+            text: root.text;
+            color: Theme.text;
+            wrap: word-wrap;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+        if root.action-text != "": AppButton {
+            text: root.action-text;
+            clicked => {
+                root.action();
+            }
+        }
+    }
+}
+
+// A static placeholder block shown while content loads (no shimmer: nothing animates idle).
+export component Skeleton inherits Rectangle {
+    background: Theme.hover;
+    border-radius: 6px;
+    accessible-role: none;
+}

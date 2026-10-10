@@ -5,4 +5,6 @@ pub mod images;
 pub mod model;
 pub mod query;
 
-pub use client::{Credential, Freshness, IMAGE_CACHE_CAP_BYTES, LANGUAGE, TmdbClient, ttl};
+pub use client::{
+    Credential, Freshness, IMAGE_CACHE_CAP_BYTES, LANGUAGE, TmdbClient, build_http_client, ttl,
+};

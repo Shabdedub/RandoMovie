@@ -6,15 +6,30 @@ use binary units, as Windows Explorer shows them: 1 MB is 1,048,576 bytes.
 
 ## Budgets from the spec
 
-All budgets were met by phase 5's final build (0.5.0) and still are with the Library (0.6.0).
+All budgets were met by phase 5's final build (0.5.0) and still are with the Library and its
+filters (0.7.0).
 
 | Budget | Target | Result |
 |---|---|---|
-| Idle CPU | 0 % | 0 ms of CPU in 60 s, across all threads, with a pick on screen and with search results on screen; 0 ms in 30 s with the Library on screen (0.6.0) |
+| Idle CPU | 0 % | 0 ms of CPU in 60 s, across all threads, with a pick on screen and with search results on screen; 0 ms in 30 s with the Library on screen, filters set (0.7.0) |
 | Private working set after about 20 titles | under 50 MB | 22.3 MB private bytes after 30 picks; 22.7 MB after a series of searches and opened titles more |
 | Window interactive after launch | within 0.5 s | Visible 43 to 51 ms after launch; first frame 59 to 63 ms after `main` starts |
-| `RandoMovie.exe` size | under 15 MB | 13.63 MB (14,295,040 bytes) with the Library; 13.17 MB in 0.5.0 |
+| `RandoMovie.exe` size | under 15 MB | 13.77 MB (14,439,424 bytes) in 0.7.0; 13.63 MB in 0.6.0, 13.17 MB in 0.5.0 |
 | IMDb rebuild peak memory | "modest" | About 2 MB extra (phase 1) |
+
+## Library filters (0.7.0)
+
+Measured on 2026-10-11 with the 0.7.0 release build, on the same test profile with eight
+titles across the two lists, Movies and one genre chosen.
+
+| Measurement | Result |
+|---|---|
+| `RandoMovie.exe` | 13.77 MB (14,439,424 bytes), 144 KB more than 0.6.0 |
+| Idle 30 s with the filtered Library on screen, all threads | 0 ms of CPU |
+| Private bytes | 15.7 MB |
+
+Filtering runs on the UI thread over the list already in memory, so a filter change needs no
+query and no request. The exe is 1.23 MB under budget.
 
 ## After phase 5: the Library (0.6.0)
 

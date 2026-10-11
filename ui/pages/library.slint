@@ -1,10 +1,13 @@
 // The Library: titles marked "Seen it" (Watched) or "Not interested" on the Pick screen, one
-// tab each. Up and Down move through a tab's titles, Enter opens one, and Delete takes it off
-// the list so it can be picked again.
+// tab each, filtered by type and genre. Up and Down move through a tab's titles, Enter opens
+// one, and Delete takes it off the list so it can be picked again.
 
 import { ScrollView } from "std-widgets.slint";
 import { Theme, Icons } from "../theme.slint";
-import { AppButton, ButtonKind, FontIcon, Notice, Segmented, Skeleton, TextButton } from "../widgets.slint";
+import {
+    AppButton, ButtonKind, FilterButton, FilterPanel, FontIcon, Notice, PanelNote, PanelTitle,
+    Segmented, Skeleton, TextButton, ToggleChip,
+} from "../widgets.slint";
 import { CardMetrics, TitleCardSkeleton, TitleCardView } from "../card.slint";
 import { SearchMetrics } from "search.slint";
 import { LibraryRow, LibraryState } from "../state.slint";
@@ -228,6 +231,72 @@ export component LibraryPage inherits Rectangle {
             wrap: word-wrap;
         }
 
+        // Filters for both lists, built like the Pick screen's filter bar.
+        if !LibraryState.card-open: HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            Segmented {
+                label: "Movies, series or both";
+                options: ["Movies", "Series", "Both"];
+                selected <=> LibraryState.media-index;
+                changed(index) => {
+                    LibraryState.media-selected(index);
+                }
+            }
+            FilterButton {
+                icon: Icons.tag;
+                label: "Genres";
+                text: LibraryState.genre-summary;
+                active: LibraryState.genre-summary != "Any genre";
+                clicked => {
+                    genre-popup.show();
+                }
+                // Opens with focus on "Any genre"; Esc closes it and focus returns here.
+                genre-popup := PopupWindow {
+                    x: 0;
+                    y: parent.height + 6px;
+                    width: 460px;
+                    close-policy: PopupClosePolicy.close-on-click-outside;
+                    forward-focus: any-genre;
+                    FilterPanel {
+                        PanelTitle {
+                            text: "Genres";
+                        }
+                        PanelNote {
+                            text: LibraryState.genres.length == 0
+                                ? "Genres appear here once titles on your lists have loaded them."
+                                : "Shows titles in any genre you choose, on both lists.";
+                        }
+                        FlexboxLayout {
+                            spacing: 8px;
+                            any-genre := ToggleChip {
+                                text: "Any genre";
+                                checked: LibraryState.genre-summary == "Any genre";
+                                toggled => {
+                                    LibraryState.genres-cleared();
+                                }
+                            }
+                            for genre[index] in LibraryState.genres: ToggleChip {
+                                text: genre.name;
+                                checked: genre.selected;
+                                toggled => {
+                                    LibraryState.genre-toggled(index);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if LibraryState.filtered: AppButton {
+                text: "Clear filters";
+                icon: Icons.undo;
+                kind: ButtonKind.subtle;
+                clicked => {
+                    LibraryState.clear-filters();
+                }
+            }
+        }
+
         if LibraryState.notice != "" && !LibraryState.card-open: HorizontalLayout {
             spacing: 10px;
             height: 24px;
@@ -322,12 +391,21 @@ export component LibraryPage inherits Rectangle {
                     }
                 }
 
-                if LibraryState.rows.length == 0 && !LibraryState.loading && LibraryState.tab == 0: Notice {
+                if LibraryState.rows.length == 0 && !LibraryState.loading && LibraryState.filtered: Notice {
+                    icon: Icons.filter;
+                    title: "No titles match";
+                    body: "Nothing on this list fits these filters. Try another type or genre.";
+                    action: "Clear filters";
+                    act => {
+                        LibraryState.clear-filters();
+                    }
+                }
+                if LibraryState.rows.length == 0 && !LibraryState.loading && !LibraryState.filtered && LibraryState.tab == 0: Notice {
                     icon: Icons.seen;
                     title: "Nothing marked as seen yet";
                     body: "When a pick is something you've already watched, choose Seen it. It's listed here and never picked again.";
                 }
-                if LibraryState.rows.length == 0 && !LibraryState.loading && LibraryState.tab == 1: Notice {
+                if LibraryState.rows.length == 0 && !LibraryState.loading && !LibraryState.filtered && LibraryState.tab == 1: Notice {
                     icon: Icons.blocked;
                     title: "Nothing marked as not interested";
                     body: "When a pick isn't for you, choose Not interested. It's listed here and never picked again.";

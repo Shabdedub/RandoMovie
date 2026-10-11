@@ -42,6 +42,7 @@ src/
   worker/images.rs              decode, scale to exact pixels, round corners, blur backdrops (binary)
   card.rs                       the title card's display text and where-to-watch groups
   search.rs                     query cleanup, result pages to rows, each row's rating and verdict
+  library.rs                    the Library's filters: Movies / Series / Both, genres, genre choices
   error.rs                      Error / ApiError enums, all Clone + Display, no secrets inside
   paths.rs                      %APPDATA%\RandoMovie and %LOCALAPPDATA%\RandoMovie locations
   format.rs                     "★ 7.8 IMDb · 1.2M votes", runtimes, verdict text
@@ -334,9 +335,10 @@ no `tempfile` (tests use unique folders under the system temp dir).
 
 - **Where it comes from.** The marks the Pick screen already stored for exclusions, so nothing
   is tracked twice. The table gained the title's name, year, poster path and IMDb id (schema
-  version 2). Marking a title saves them from the details the card was built from, which are
-  in the cache, so it costs no request. Columns are added when missing rather than by
-  `user_version`, which an older build resets when it opens the database.
+  version 2) and its TMDB genre names as a JSON array (version 3). Marking a title saves them
+  from the details the card was built from, which are in the cache, so it costs no request.
+  Columns are added when missing rather than by `user_version`, which an older build resets
+  when it opens the database.
 - **Data flow.** Opening the page sends `LoadLibrary`. The worker answers at once from one
   SQLite query, with IMDb ratings from the local index, then fills in titles marked before
   the Library existed: their details four at a time, saved, and sent row by row. Answers carry
@@ -349,6 +351,14 @@ no `tempfile` (tests use unique folders under the system temp dir).
   the other reason, and Undo is a new `Restore`, which writes the title back with its first
   date and details. A removal or move updates the rows in place, keeping the selection where it
   was; anything else (an Undo, a change made on Pick) reads the list again.
+- **Filters (0.7.0).** Movies / Series / Both and genres, for both tabs, held by the controller
+  for the session. Genres are stored as TMDB names and matched through
+  `picker::genres::unified_names`, the same normalization the Pick screen's unified list is
+  built with, so the panel shows the same names and a series' "Sci-Fi & Fantasy" matches
+  Science Fiction. The rules live in `library.rs` in the library crate, with tests. The genre
+  chips are the genres titles on either list have; tab counts and the empty state follow the
+  filters. The filter bar reuses the Pick screen's controls, so its panel opens with focus on
+  "Any genre", and choosing genres updates the chips in place so focus stays put.
 - **Keyboard and screen readers.** The list takes the focus when the page opens but selects
   nothing, so no ring shows until a key is pressed. Up, Down, Home, End and the page keys move,
   Enter opens, Delete removes. Each row's Remove button is reachable by mouse and screen reader
@@ -364,8 +374,9 @@ no `tempfile` (tests use unique folders under the system temp dir).
   against a fake catalog with a seeded RNG. Phase 5 added the theme's WCAG contrast against
   `ui/theme.slint`, settings with a byte-order mark, and hand-edited filter values snapping to
   the filter bar's steps. The Library added the marked-title list and its saved details, the
-  upgrade of a version 1 database (also after an older build reset its version), and the
-  "Marked 3 days ago" wording.
+  upgrade of a version 1 database (also after an older build reset its version), the
+  "Marked 3 days ago" wording, and its filters: type and genre together, unified genre names,
+  and the genre choices.
 - `tests/live.rs` holds `#[ignore]`d live tests using `TMDB_TOKEN` from `.env`, including the
   acceptance checks for single-service picks, free-only picks and search speed.
 - Every phase ends with a release build, `cargo clippy --all-targets -- -D warnings`, `cargo test`,

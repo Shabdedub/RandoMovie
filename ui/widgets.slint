@@ -508,6 +508,30 @@ export component Pill inherits Rectangle {
     }
 }
 
+// The frame of a filter's popup panel.
+export component FilterPanel inherits Rectangle {
+    background: Theme.surface;
+    border-radius: Theme.radius-card;
+    border-width: 1px;
+    border-color: Theme.border-strong;
+    VerticalLayout {
+        padding: 16px;
+        spacing: 10px;
+        @children
+    }
+}
+
+export component PanelTitle inherits Text {
+    font-weight: 600;
+    color: Theme.text;
+}
+
+export component PanelNote inherits Text {
+    font-size: Theme.caption;
+    color: Theme.text-muted;
+    wrap: word-wrap;
+}
+
 // A filter in the filter bar: shows the current choice and opens its panel.
 export component FilterButton inherits Rectangle {
     in property <string> icon;

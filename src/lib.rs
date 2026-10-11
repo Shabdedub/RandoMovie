@@ -5,6 +5,7 @@ pub mod card;
 pub mod error;
 pub mod format;
 pub mod imdb;
+pub mod library;
 pub mod media;
 pub mod paths;
 pub mod picker;

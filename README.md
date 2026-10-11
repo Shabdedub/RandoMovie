@@ -18,13 +18,13 @@ non-commercial use.
 | 3 | Pick screen: verification, filters, history, exclusions, prefetch | Done |
 | 4 | Search and the shared title card | Done |
 | 5 | Polish, accessibility, performance measurement, final README | Done |
-| After 5 | The Library: what you marked as watched or not interested (0.6.0) | Done |
+| After 5 | The Library: what you marked as watched or not interested (0.6.0), with type and genre filters (0.7.0) | Done |
 
 Every screen works: first run, Pick, Search, Library, My Services, Settings and About. Phase 5's
 build (0.5.0) met every budget in the spec: 0 % CPU at idle, about 22 MB of private memory after
-30 titles, and a window on screen about 50 ms after launch. With the Library (0.6.0) the exe is
-13.63 MB, still under the 15 MB budget. PERFORMANCE.md has the measurements and how they were
-taken.
+30 titles, and a window on screen about 50 ms after launch. With the Library and its filters
+(0.7.0) the exe is 13.77 MB, still under the 15 MB budget. PERFORMANCE.md has the measurements
+and how they were taken.
 
 ## Prerequisites
 
@@ -111,13 +111,18 @@ floor, clear the cache, refresh the IMDb ratings, and change or remove the token
 - **Library** in the navigation rail lists every title you've marked on the Pick screen, in two
   tabs: **Watched** for "Seen it", and **Not interested**. The most recently marked come first,
   each with its poster, type and year, IMDb rating, and when you marked it.
+- **Filters** above the list narrow both tabs: **Movies / Series / Both**, and **Genres**, where
+  a title in any chosen genre shows. Genres use the Pick screen's names, so a series' "Sci-Fi &
+  Fantasy" counts as Science Fiction and as Fantasy. The tab counts follow the filters, and
+  **Clear filters** shows everything again.
 - **Open a title** for its card, with where to watch it now. **Remove from …** takes it off the
   list so it can be picked again, and **Move to …** puts it on the other list, still out of
   picks.
 - **Remove** on a row, or Delete with the keyboard, takes it off the list without opening it.
   **Undo** brings back the last removal or move.
 - The Library reads the local database, so it opens instantly and works offline. Titles marked
-  before version 0.6.0 load their name and poster from TMDB once, the first time it opens.
+  before version 0.6.0 load their name and poster from TMDB once, the first time it opens, and
+  titles marked with 0.6.0 load their genres the same way.
 
 ## Keyboard and accessibility
 
@@ -308,19 +313,22 @@ The spec left these points open. Each choice favours fast, light and predictable
   launch of each new exe; the app itself shows its window about 50 ms after it starts.
 - **Library tabs.** They're called "Watched" and "Not interested", the words people use for
   the lists; the Pick screen's button stays "Seen it".
-- **Marked titles keep their details.** Marking a title saves its name, year, poster and IMDb
-  id with the mark, taken from the details already cached for the card, so the Library needs
-  no network. Titles marked before the Library existed get them once, four at a time, the
-  first time it opens; one that can't be loaded offline says so and tries again online.
+- **Marked titles keep their details.** Marking a title saves its name, year, poster, IMDb id
+  and genres with the mark, taken from the details already cached for the card, so the Library
+  needs no network. Titles marked before the Library existed get them once, four at a time,
+  the first time it opens; one that can't be loaded offline says so and tries again online.
+- **Library filters.** They apply to both tabs and last until the app closes; it opens with
+  every title showing. The genre panel lists only genres that titles on either list have. A
+  title whose genres haven't loaded yet still shows unless a genre is chosen.
 - **Times in the Library.** Rows say "Marked 3 days ago" rather than a date: elapsed time
   needs no time zone, and dates in UTC could be a day off in Australia. They're worked out
   each time the Library opens.
 - **Removing, moving and Undo.** Removing a title makes it pickable again. Moving it to the
   other list keeps it out of picks and dates it now. Undo restores the title exactly, original
   date included, until you switch tabs, open another title or leave the page.
-- **Database upgrade.** The Library added four columns to the table of marked titles (schema
-  version 2). They're added only when missing, so a database an older version opened in the
-  meantime still upgrades.
+- **Database upgrade.** The Library added five columns to the table of marked titles: the
+  details (schema version 2) and the genres (version 3). They're added only when missing, so a
+  database an older version opened in the meantime still upgrades.
 
 ## Acceptance checks
 

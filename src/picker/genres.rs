@@ -16,6 +16,30 @@ pub struct UnifiedGenre {
     pub tv_ids: Vec<u32>,
 }
 
+/// A TMDB genre name as names in the unified list: "Action & Adventure" gives Action and
+/// Adventure, "Sci-Fi & Fantasy" gives Science Fiction and Fantasy. Movie genres pass through.
+fn unified_parts(name: &str) -> impl Iterator<Item = &str> {
+    name.split(" & ").map(|part| {
+        let part = part.trim();
+        ALIASES
+            .iter()
+            .find(|(alias, _)| alias.eq_ignore_ascii_case(part))
+            .map_or(part, |(_, canonical)| *canonical)
+    })
+}
+
+/// A title's TMDB genres as names in the unified list, in order and without repeats, so a
+/// series' "Sci-Fi & Fantasy" and a movie's "Science Fiction" match the same choice.
+pub fn unified_names(names: &[String]) -> Vec<String> {
+    let mut unified: Vec<String> = Vec::new();
+    for part in names.iter().flat_map(|name| unified_parts(name)) {
+        if !part.is_empty() && !unified.iter().any(|u| u.eq_ignore_ascii_case(part)) {
+            unified.push(part.to_owned());
+        }
+    }
+    unified
+}
+
 /// Builds the unified list, sorted by name. TV genres such as "Action & Adventure" are
 /// split on " & " so they join both "Action" and "Adventure".
 pub fn unify(movie: &[Genre], tv: &[Genre]) -> Vec<UnifiedGenre> {
@@ -28,12 +52,7 @@ pub fn unify(movie: &[Genre], tv: &[Genre]) -> Vec<UnifiedGenre> {
         })
         .collect();
     for genre in tv {
-        for part in genre.name.split(" & ") {
-            let part = part.trim();
-            let name = ALIASES
-                .iter()
-                .find(|(alias, _)| alias.eq_ignore_ascii_case(part))
-                .map_or(part, |(_, canonical)| canonical);
+        for name in unified_parts(&genre.name) {
             match list.iter_mut().find(|u| u.name.eq_ignore_ascii_case(name)) {
                 Some(unified) => {
                     if !unified.tv_ids.contains(&genre.id) {
@@ -107,6 +126,23 @@ mod tests {
         assert_eq!(find(&list, "Kids").tv_ids, [10762]);
         assert_eq!(find(&list, "Politics").tv_ids, [10768]);
         assert!(list.windows(2).all(|w| w[0].name < w[1].name), "sorted");
+    }
+
+    #[test]
+    fn title_genres_use_the_unified_names() {
+        let names = |n: &[&str]| n.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            unified_names(&names(&["Sci-Fi & Fantasy", "Action & Adventure", "Drama"])),
+            names(&["Science Fiction", "Fantasy", "Action", "Adventure", "Drama"])
+        );
+        assert_eq!(unified_names(&names(&["Science Fiction", "Thriller"])), names(&["Science Fiction", "Thriller"]));
+        assert_eq!(unified_names(&names(&["War & Politics", "War"])), names(&["War", "Politics"]), "no repeats");
+        assert!(unified_names(&[]).is_empty());
+        // Every name a title can have is in the unified list the filter bar shows.
+        let list = unified();
+        for name in unified_names(&names(&["Sci-Fi & Fantasy", "Action & Adventure", "War & Politics", "Kids"])) {
+            assert!(list.iter().any(|g| g.name == name), "{name} missing from the unified list");
+        }
     }
 
     #[test]

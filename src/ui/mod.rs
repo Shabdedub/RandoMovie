@@ -384,6 +384,12 @@ fn wire_callbacks(ui: &AppWindow, controller: &Rc<RefCell<Controller>>) {
     let library = ui.global::<LibraryState>();
     library.on_tab_selected(handler!(controller, weak, |c, ui, index: i32| c
         .library_tab_selected(&ui, index)));
+    library.on_media_selected(handler!(controller, weak, |c, ui, index: i32| c
+        .library_media_selected(&ui, index)));
+    library.on_genre_toggled(handler!(controller, weak, |c, ui, index: i32| c
+        .library_genre_toggled(&ui, index)));
+    library.on_genres_cleared(handler!(controller, weak, |c, ui| c.library_genres_cleared(&ui)));
+    library.on_clear_filters(handler!(controller, weak, |c, ui| c.library_clear_filters(&ui)));
     library.on_open(handler!(controller, weak, |c, ui, index: i32| c.library_open(&ui, index)));
     library.on_remove(handler!(controller, weak, |c, ui, index: i32| c.library_remove(&ui, index)));
     library.on_remove_open(handler!(controller, weak, |c, ui| c.library_remove_open(&ui)));

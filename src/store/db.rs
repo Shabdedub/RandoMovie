@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use rusqlite::Connection;
 
-const SCHEMA_VERSION: i32 = 2;
+const SCHEMA_VERSION: i32 = 3;
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS http_cache (
@@ -40,17 +40,20 @@ CREATE TABLE IF NOT EXISTS exclusions (
     year        INTEGER,
     poster_path TEXT,
     imdb_id     TEXT,
+    genres      TEXT,
     PRIMARY KEY (media, tmdb_id)
 );
 ";
 
-/// Columns version 2 added to `exclusions`: what the Library shows for a marked title, so it
-/// can list them without the network.
-const TITLE_COLUMNS: [(&str, &str); 4] = [
+/// Columns added to `exclusions` for the Library: what it shows for a marked title, so it can
+/// list them without the network (version 2), and TMDB's genres as a JSON array for its genre
+/// filter (version 3).
+const TITLE_COLUMNS: [(&str, &str); 5] = [
     ("name", "TEXT"),
     ("year", "INTEGER"),
     ("poster_path", "TEXT"),
     ("imdb_id", "TEXT"),
+    ("genres", "TEXT"),
 ];
 
 pub struct Store {
@@ -151,6 +154,7 @@ mod tests {
                 year: Some(1999),
                 poster_path: None,
                 imdb_id: Some("tt0133093".into()),
+                genres: Some(vec!["Action".into()]),
             };
             store.set_title_summary(matrix, &summary).unwrap();
         }
@@ -158,7 +162,8 @@ mod tests {
         Connection::open(&path).unwrap().pragma_update(None, "user_version", 1).unwrap();
         let store = Store::open(&path).unwrap();
         let marked = store.marked_titles().unwrap();
-        assert_eq!(marked[0].summary.as_ref().map(|s| s.name.as_str()), Some("The Matrix"));
+        let summary = marked[0].summary.as_ref().unwrap();
+        assert_eq!((summary.name.as_str(), summary.genres.as_deref()), ("The Matrix", Some(&["Action".to_owned()][..])));
         drop(store);
         std::fs::remove_dir_all(&dir).unwrap();
     }

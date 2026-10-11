@@ -22,12 +22,19 @@ fn summary_of(details: &TitleDetails) -> TitleSummary {
         year: details.year,
         poster_path: details.poster_path.clone(),
         imdb_id: details.imdb_id.clone(),
+        genres: Some(details.genres.clone()),
     }
 }
 
+/// Titles marked before the Library existed have no summary; those saved by version 0.6.0
+/// have one without genres.
+fn needs_details(marked: &MarkedTitle) -> bool {
+    marked.summary.as_ref().is_none_or(|summary| summary.genres.is_none())
+}
+
 impl Worker {
-    /// Every marked title at once from the database. Titles marked before the Library
-    /// existed then get their details, once.
+    /// Every marked title at once from the database. Titles saved without their details or
+    /// genres then get them, once.
     pub(super) async fn load_library(self: &Rc<Self>, id: u64) {
         let marked = self.store.marked_titles().unwrap_or_else(|e| {
             log_error!("the Library couldn't be read: {e}");
@@ -35,7 +42,7 @@ impl Worker {
         });
         let items = marked.iter().map(|m| self.library_item(m, false)).collect();
         self.emit(Update::Library { id, items });
-        let missing: Vec<MarkedTitle> = marked.into_iter().filter(|m| m.summary.is_none()).collect();
+        let missing: Vec<MarkedTitle> = marked.into_iter().filter(needs_details).collect();
         if missing.is_empty() {
             return;
         }
@@ -72,10 +79,14 @@ impl Worker {
     }
 
     async fn fill_summary(&self, id: u64, mut marked: MarkedTitle, client: Option<&TmdbClient>, region: &str) {
-        marked.summary = match client {
+        let fetched = match client {
             Some(client) => self.remember_summary(client, region, marked.title).await,
             None => None,
         };
+        // A title that already had its name keeps it when its genres can't be loaded.
+        if fetched.is_some() {
+            marked.summary = fetched;
+        }
         let unavailable = marked.summary.is_none();
         self.emit(Update::LibraryItem {
             id,

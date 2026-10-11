@@ -41,6 +41,9 @@ pub struct TitleSummary {
     pub year: Option<u16>,
     pub poster_path: Option<String>,
     pub imdb_id: Option<String>,
+    /// TMDB's genre names, for the Library's genre filter. `None` for a summary saved before
+    /// genres were (version 0.6.0), until they're loaded.
+    pub genres: Option<Vec<String>>,
 }
 
 /// A title marked "Seen it" or "Not interested".
@@ -136,19 +139,22 @@ impl Store {
     pub fn marked_titles(&self) -> rusqlite::Result<Vec<MarkedTitle>> {
         let inner = self.lock();
         let mut stmt = inner.conn.prepare(
-            "SELECT media, tmdb_id, reason, created_at, name, year, poster_path, imdb_id
+            "SELECT media, tmdb_id, reason, created_at, name, year, poster_path, imdb_id, genres
              FROM exclusions ORDER BY created_at DESC, rowid DESC",
         )?;
         let rows = stmt.query_map([], |r| {
             let media: String = r.get(0)?;
             let reason: String = r.get(2)?;
             let name: Option<String> = r.get(4)?;
+            let genres: Option<String> = r.get(8)?;
             let summary = match name {
                 Some(name) => Some(TitleSummary {
                     name,
                     year: r.get(5)?,
                     poster_path: r.get(6)?,
                     imdb_id: r.get(7)?,
+                    // Unreadable genres count as missing, so they're loaded again.
+                    genres: genres.and_then(|json| serde_json::from_str(&json).ok()),
                 }),
                 None => None,
             };
@@ -173,8 +179,12 @@ impl Store {
 
     /// Saves what the Library shows for a marked title. A title that isn't marked is left out.
     pub fn set_title_summary(&self, title: TitleRef, summary: &TitleSummary) -> rusqlite::Result<()> {
+        let genres = summary
+            .genres
+            .as_ref()
+            .map(|genres| serde_json::to_string(genres).unwrap_or_default());
         self.lock().conn.execute(
-            "UPDATE exclusions SET name = ?3, year = ?4, poster_path = ?5, imdb_id = ?6
+            "UPDATE exclusions SET name = ?3, year = ?4, poster_path = ?5, imdb_id = ?6, genres = ?7
              WHERE media = ?1 AND tmdb_id = ?2",
             params![
                 title.media.as_str(),
@@ -182,19 +192,20 @@ impl Store {
                 summary.name,
                 summary.year,
                 summary.poster_path,
-                summary.imdb_id
+                summary.imdb_id,
+                genres
             ],
         )?;
         Ok(())
     }
 
-    /// The title is marked but its summary isn't saved yet.
+    /// The title is marked but its summary isn't saved yet, or was saved without genres.
     pub fn needs_title_summary(&self, title: TitleRef) -> rusqlite::Result<bool> {
         let missing: Option<bool> = self
             .lock()
             .conn
             .query_row(
-                "SELECT name IS NULL FROM exclusions WHERE media = ?1 AND tmdb_id = ?2",
+                "SELECT name IS NULL OR genres IS NULL FROM exclusions WHERE media = ?1 AND tmdb_id = ?2",
                 params![title.media.as_str(), title.id],
                 |r| r.get(0),
             )
@@ -256,6 +267,13 @@ mod tests {
             year: Some(1999),
             poster_path: Some("/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg".into()),
             imdb_id: Some("tt0133093".into()),
+            genres: None,
+        };
+        store.set_title_summary(matrix, &summary).unwrap();
+        assert!(store.needs_title_summary(matrix).unwrap(), "saved before genres were");
+        let summary = TitleSummary {
+            genres: Some(vec!["Action".into(), "Science Fiction".into()]),
+            ..summary
         };
         store.set_title_summary(matrix, &summary).unwrap();
         assert!(!store.needs_title_summary(matrix).unwrap());

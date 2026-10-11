@@ -1,6 +1,7 @@
 //! The Library: titles marked "Seen it" (the Watched tab) or "Not interested", read from the
-//! database each time the page shows. A row opens the title card. A title can be taken off
-//! its list, so it can be picked again, or moved to the other list, with Undo for either.
+//! database each time the page shows, and filtered by type and genre. A row opens the title
+//! card. A title can be taken off its list, so it can be picked again, or moved to the other
+//! list, with Undo for either.
 
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -9,7 +10,9 @@ use randomovie::card::TitleCard;
 use randomovie::error::ApiError;
 use randomovie::format;
 use randomovie::imdb::ImdbStatus;
-use randomovie::media::TitleRef;
+use randomovie::library::{LibraryFilter, genre_options};
+use randomovie::media::{MediaType, TitleRef};
+use randomovie::picker::filters::genre_summary;
 use randomovie::store::ExclusionReason;
 use randomovie::util::time::now_unix;
 use slint::{ComponentHandle, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, Timer, VecModel};
@@ -19,7 +22,7 @@ use super::card::{CardSlot, Surface};
 use super::pick::PLACEHOLDER_DELAY;
 use super::search::{error_message, thumb_key};
 use crate::worker::{Command, ImageSpec, LibraryItem};
-use crate::{AppWindow, LibraryRow, LibraryState};
+use crate::{AppWindow, GenreOption, LibraryRow, LibraryState};
 
 const TABS: [ExclusionReason; 2] = [ExclusionReason::Seen, ExclusionReason::NotInterested];
 
@@ -32,6 +35,11 @@ pub(super) struct LibraryView {
     rows: Rc<VecModel<LibraryRow>>,
     tabs: Rc<VecModel<SharedString>>,
     tab: ExclusionReason,
+    /// For both lists, for this session.
+    filter: LibraryFilter,
+    /// The genre panel's chips, and their names in order.
+    genre_options: Rc<VecModel<GenreOption>>,
+    genre_names: Vec<String>,
     /// The newest load; answers to older ones are dropped.
     load_id: u64,
     thumbs: HashMap<String, Image>,
@@ -56,6 +64,9 @@ impl LibraryView {
             rows: Rc::new(VecModel::default()),
             tabs: Rc::new(VecModel::from(TABS.map(|reason| SharedString::from(list_name(reason))).to_vec())),
             tab: ExclusionReason::Seen,
+            filter: LibraryFilter::default(),
+            genre_options: Rc::new(VecModel::default()),
+            genre_names: Vec::new(),
             load_id: 0,
             thumbs: HashMap::new(),
             pending_thumbs: HashSet::new(),
@@ -73,6 +84,21 @@ impl LibraryView {
 
     fn poster_path(&self, title: TitleRef) -> Option<&str> {
         self.item(title)?.summary.as_ref()?.poster_path.as_deref()
+    }
+
+    /// The title passes the filters.
+    fn shows(&self, item: &LibraryItem) -> bool {
+        let genres = item.summary.as_ref().and_then(|summary| summary.genres.as_deref());
+        self.filter.matches(item.title.media, genres)
+    }
+}
+
+/// The filter bar's Movies / Series / Both index.
+fn media_index(media: Option<MediaType>) -> i32 {
+    match media {
+        Some(MediaType::Movie) => 0,
+        Some(MediaType::Tv) => 1,
+        None => 2,
     }
 }
 
@@ -129,6 +155,7 @@ impl Controller {
         let state = ui.global::<LibraryState>();
         state.set_rows(ModelRc::from(self.library.rows.clone()));
         state.set_tabs(ModelRc::from(self.library.tabs.clone()));
+        state.set_genres(ModelRc::from(self.library.genre_options.clone()));
         state.set_groups(self.library.card.groups_model());
     }
 
@@ -188,7 +215,8 @@ impl Controller {
         self.request_library_thumbs(ui);
     }
 
-    /// The tab's rows from `items`. The selection follows its title while it's listed.
+    /// The tab's rows from `items`, through the filters. The selection follows its title while
+    /// it's listed.
     fn fill_library_rows(&mut self, ui: &AppWindow) {
         let state = ui.global::<LibraryState>();
         let selected = usize::try_from(state.get_selected())
@@ -201,7 +229,7 @@ impl Controller {
             .library
             .items
             .iter()
-            .filter(|item| item.reason == tab)
+            .filter(|item| item.reason == tab && self.library.shows(item))
             .map(|item| item.title)
             .collect();
         let rows: Vec<LibraryRow> = shown
@@ -217,8 +245,14 @@ impl Controller {
         state.set_tab(TABS.iter().position(|&reason| reason == tab).unwrap_or(0) as i32);
         state.set_selected(selected);
         state.set_loading(false);
+        // The tabs count what the filters let through, as the list does.
         for (index, reason) in TABS.into_iter().enumerate() {
-            let count = self.library.items.iter().filter(|item| item.reason == reason).count();
+            let count = self
+                .library
+                .items
+                .iter()
+                .filter(|item| item.reason == reason && self.library.shows(item))
+                .count();
             let label: SharedString = match count {
                 0 => list_name(reason).into(),
                 n => format!("{} ({n})", list_name(reason)).into(),
@@ -227,7 +261,85 @@ impl Controller {
                 self.library.tabs.set_row_data(index, label);
             }
         }
+        self.fill_library_filters(ui);
         self.request_library_thumbs(ui);
+    }
+
+    /// The filter bar: the type choice, and genre chips for every genre on either list.
+    fn fill_library_filters(&mut self, ui: &AppWindow) {
+        let filter = &self.library.filter;
+        let names = genre_options(
+            self.library
+                .items
+                .iter()
+                .filter_map(|item| item.summary.as_ref()?.genres.as_deref()),
+            &filter.genres,
+        );
+        let options: Vec<GenreOption> = names
+            .iter()
+            .map(|name| GenreOption {
+                name: name.as_str().into(),
+                selected: filter.genres.iter().any(|chosen| chosen.eq_ignore_ascii_case(name)),
+            })
+            .collect();
+        // In place when the names are the same, so the open genre panel keeps its focus.
+        if names == self.library.genre_names {
+            for (index, option) in options.into_iter().enumerate() {
+                if self.library.genre_options.row_data(index).as_ref() != Some(&option) {
+                    self.library.genre_options.set_row_data(index, option);
+                }
+            }
+        } else {
+            self.library.genre_options.set_vec(options);
+            self.library.genre_names = names;
+        }
+        let state = ui.global::<LibraryState>();
+        state.set_media_index(media_index(filter.media));
+        state.set_genre_summary(genre_summary(&filter.genres).into());
+        state.set_filtered(filter.is_active());
+    }
+
+    pub fn library_media_selected(&mut self, ui: &AppWindow, index: i32) {
+        let media = match index {
+            0 => Some(MediaType::Movie),
+            1 => Some(MediaType::Tv),
+            _ => None,
+        };
+        if media != self.library.filter.media {
+            self.library.filter.media = media;
+            self.library_filters_changed(ui);
+        }
+    }
+
+    pub fn library_genre_toggled(&mut self, ui: &AppWindow, index: i32) {
+        if let Some(name) = usize::try_from(index).ok().and_then(|i| self.library.genre_names.get(i)).cloned() {
+            self.library.filter.toggle_genre(&name);
+            self.library_filters_changed(ui);
+        }
+    }
+
+    /// "Any genre".
+    pub fn library_genres_cleared(&mut self, ui: &AppWindow) {
+        if !self.library.filter.genres.is_empty() {
+            self.library.filter.genres.clear();
+            self.library_filters_changed(ui);
+        }
+    }
+
+    pub fn library_clear_filters(&mut self, ui: &AppWindow) {
+        if self.library.filter.is_active() {
+            self.library.filter = LibraryFilter::default();
+            self.library_filters_changed(ui);
+        }
+    }
+
+    fn library_filters_changed(&mut self, ui: &AppWindow) {
+        let state = ui.global::<LibraryState>();
+        state.set_list_serial(state.get_list_serial().wrapping_add(1));
+        self.fill_library_rows(ui);
+        let count = self.library.shown.len();
+        let noun = if count == 1 { "title" } else { "titles" };
+        state.set_announcement(format!("{count} {noun} on {}", list_name(self.library.tab)).into());
     }
 
     pub fn library_tab_selected(&mut self, ui: &AppWindow, index: i32) {

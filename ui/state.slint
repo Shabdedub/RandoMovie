@@ -259,8 +259,16 @@ export global LibraryState {
     // What the last removal or move did, with Undo.
     in property <string> notice;
     in property <bool> can-undo;
-    // Bumped when the tab changes, to scroll the list back to the top.
+    // Bumped when the tab or a filter changes, to scroll the list back to the top.
     in-out property <int> list-serial;
+
+    // Filters for both lists: 0 Movies, 1 Series, 2 Both; and genres, where any chosen one
+    // matches.
+    in-out property <int> media-index: 2;
+    in property <[GenreOption]> genres;
+    in property <string> genre-summary: "Any genre";
+    // A filter is set, so "Clear filters" shows.
+    in property <bool> filtered;
 
     // The opened title, shown over the list, which keeps its place.
     in property <bool> card-open;
@@ -274,6 +282,10 @@ export global LibraryState {
     in property <string> announcement;
 
     callback tab-selected(int);
+    callback media-selected(int);
+    callback genre-toggled(int);
+    callback genres-cleared();
+    callback clear-filters();
     callback open(int);
     // Takes the title off its list, so it can be picked again.
     callback remove(int);

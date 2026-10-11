@@ -7,7 +7,7 @@ import { FontIcon } from "widgets.slint";
 import { NavRail } from "nav.slint";
 import { ServicesSheet } from "services.slint";
 import { TokenDialog } from "token.slint";
-import { AppState, Page, PickState, TokenForm } from "state.slint";
+import { AppState, Page, PickState, SearchState, TokenForm } from "state.slint";
 import { PickPage } from "pages/pick.slint";
 import { SearchPage } from "pages/search.slint";
 import { ServicesPage } from "pages/services.slint";
@@ -16,10 +16,11 @@ import { OnboardingView } from "pages/onboarding.slint";
 
 export { Theme } from "theme.slint";
 export { CardMetrics } from "card.slint";
+export { SearchMetrics } from "pages/search.slint";
 export {
     AppState, Exclusion, GenreOption, OnboardingState, OnboardingStep, Page, PickState, PickStatus,
-    ServicesState, ServiceTile, SettingsState, TitleCardData, TokenForm, VariantRow, WatchChip,
-    WatchGroup,
+    SearchRow, SearchState, SearchStatus, ServicesState, ServiceTile, SettingsState, TitleCardData,
+    TokenForm, VariantRow, WatchChip, WatchGroup,
 } from "state.slint";
 
 component OfflineBanner inherits Rectangle {
@@ -63,6 +64,21 @@ export component AppWindow inherits Window {
         Theme.dark = dark;
     }
 
+    // When the page or the side sheet that held the focus goes away, keys come back to the
+    // window, so Space, Enter and Ctrl+F keep working. Search puts it in its own box.
+    property <Page> current-page: AppState.page;
+    changed current-page => {
+        if (self.current-page != Page.search) {
+            keys.focus();
+        }
+    }
+    property <bool> sheet-open: AppState.services-sheet-open;
+    changed sheet-open => {
+        if (!self.sheet-open) {
+            keys.focus();
+        }
+    }
+
     // Keys that no focused control used: Esc closes overlays, then leaves a text field;
     // Ctrl+F opens Search; Space or Enter picks on the Pick page.
     keys := FocusScope {
@@ -87,6 +103,7 @@ export component AppWindow inherits Window {
             }
             if (event.modifiers.control && !event.modifiers.alt && (event.text == "f" || event.text == "F")) {
                 AppState.navigate(Page.search);
+                SearchState.focus-request += 1;
                 return accept;
             }
             if (AppState.page == Page.pick && !event.modifiers.control && !event.modifiers.alt

@@ -30,12 +30,16 @@ src/
   main.rs                       binary entry: DPI awareness, logging, then ui::run
   ui/mod.rs                     backend selection, theming, window events, callback wiring  (binary)
   ui/controller.rs              UI-thread state: settings, models, logos, commands to the worker (binary)
-  ui/controller/pick.rs         Pick screen: requests, the card on screen, its images, filter bar (binary)
+  ui/controller/card.rs         a page's title card: images at exact size, poster wait, chips (binary)
+  ui/controller/pick.rs         Pick screen: requests, history buttons, exclusions, filter bar (binary)
+  ui/controller/search.rs       Search screen: debounce, pages, row info, thumbnails, opened title (binary)
   worker/mod.rs                 worker thread, current-thread Tokio runtime, command handlers (binary)
   worker/pick.rs                pick requests, the prepared next pick, session history, exclusions (binary)
+  worker/search.rs              result pages, each row's rating and availability, thumbnails (binary)
   worker/messages.rs            Command (UI to worker) and Update (worker to UI)            (binary)
   worker/images.rs              decode, scale to exact pixels, round corners, blur backdrops (binary)
   card.rs                       the title card's display text and where-to-watch groups
+  search.rs                     query cleanup, result pages to rows, each row's rating and verdict
   error.rs                      Error / ApiError enums, all Clone + Display, no secrets inside
   paths.rs                      %APPDATA%\RandoMovie and %LOCALAPPDATA%\RandoMovie locations
   format.rs                     "★ 7.8 IMDb · 1.2M votes", runtimes, verdict text
@@ -251,6 +255,34 @@ no `tempfile` (tests use unique folders under the system temp dir).
   back into the width the text wraps at, which Slint reports as a binding loop.
 - **Keyboard.** Space or Enter picks when no control uses the key, Ctrl+F opens Search, and Esc
   closes the open panel, then the side sheet, then leaves a text field.
+
+## Search decisions (phase 4)
+
+- **One card, two pages.** The title card's Rust side is a `CardSlot`: the card, its images at
+  exact size, the 250 ms poster wait and the logo chips. Pick and Search each own one and
+  differ only in which Slint global shows it. Picks, searches and opened titles share one
+  request-id counter, so an image always finds the card it was decoded for.
+- **Debounce and stale answers.** The query goes out 300 ms after the last keystroke, trimmed and
+  with spaces collapsed, from two characters. Every query gets a new id. The worker drops work
+  for older ids, and the UI ignores answers for them. "Load more" asks for the next page under
+  the same id, and titles already listed are skipped.
+- **Rows carry rating and availability.** Right after a page arrives, the worker loads each row's
+  details (the call the card also uses, cached 24 hours) four at a time, in order, and sends
+  the rating and verdict line per row. It checks the query id before each batch, so typing
+  never leaves a queue of stale requests behind. Opening a row is then usually a cache hit.
+- **Thumbnails** are TMDB's smallest poster covering 48 × 72 logical pixels at the current scale
+  (`w92` up to 190 % scaling), decoded to exact size with rounded corners. They are dropped
+  whenever Search hides and requested again when it returns.
+- **The list keeps its place.** The results and the opened card are both always laid out; the
+  card covers the list. Closing the card returns to the same scroll position and selection.
+- **Keyboard.** Down in the box is caught before the text field (which would move its cursor)
+  and moves into the results; Up from the first row returns to the box. Down on the last row
+  loads the next page. When the page that held the focus goes away, the window takes it back,
+  so Space, Enter and Ctrl+F keep working.
+- **Verdicts follow the settings.** A change of services or region, or IMDb ratings finishing
+  their first download, marks the rows and the open card stale. They refresh when Search
+  shows, after the worker has the region's services, so "Included with" never names the
+  wrong ones.
 
 ## Testing
 

@@ -2,11 +2,14 @@
 //! worker, and applies the worker's updates to the Slint models. It never does I/O itself:
 //! settings changes are saved by the worker.
 
+mod card;
 mod pick;
+mod search;
 
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+use std::time::Duration;
 
 use randomovie::format;
 use randomovie::media::MediaChoice;
@@ -16,7 +19,7 @@ use randomovie::services::{
 use randomovie::store::settings::DEFAULT_OBSCURITY_FLOOR;
 use randomovie::store::{Settings, Theme as ThemeSetting, WindowGeometry};
 use randomovie::tmdb::model::Region;
-use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::{apply_theme, resolve_dark};
@@ -25,7 +28,9 @@ use crate::{
     AppState, AppWindow, OnboardingState, OnboardingStep, Page, ServiceTile, ServicesState,
     SettingsState, TokenForm, VariantRow,
 };
-use pick::{CHIP_LOGO, PickView};
+use card::{CHIP_LOGO, Surface};
+use pick::PickView;
+use search::SearchView;
 
 /// Logo sizes in logical pixels; requests are scaled to physical pixels.
 const TILE_LOGO: f32 = 44.0;
@@ -61,7 +66,10 @@ pub struct Controller {
     imdb: ImdbInfo,
     /// The window's size and position when not maximized, kept current by window events.
     normal_geometry: Rc<Cell<Option<WindowGeometry>>>,
+    /// Ids for picks, searches and opened titles, unique across all of them.
+    last_request_id: u64,
     pick: PickView,
+    search: SearchView,
 }
 
 fn logo_key(path: &str, px: u32) -> String {
@@ -107,10 +115,33 @@ impl Controller {
             token_entered: false,
             imdb: ImdbInfo::default(),
             normal_geometry,
+            last_request_id: 0,
             pick: PickView::new(media),
+            search: SearchView::new(),
         };
         controller.initialise(ui);
         controller
+    }
+
+    fn next_request_id(&mut self) -> u64 {
+        self.last_request_id += 1;
+        self.last_request_id
+    }
+
+    /// Runs `action` after `delay`, replacing whatever `timer` was waiting to do.
+    fn later(
+        timer: &Timer,
+        weak: &slint::Weak<AppWindow>,
+        delay: Duration,
+        action: impl FnOnce(&mut Controller, &AppWindow) + 'static,
+    ) {
+        let weak = weak.clone();
+        let mut action = Some(action);
+        timer.start(TimerMode::SingleShot, delay, move || {
+            if let Some(action) = action.take() {
+                crate::ui::with_controller(&weak, action);
+            }
+        });
     }
 
     pub fn settings(&self) -> &Settings {
@@ -155,6 +186,7 @@ impl Controller {
         self.refresh_region_ui(ui);
         self.refresh_imdb_ui(ui);
         self.init_pick(ui);
+        self.init_search(ui);
     }
 
     fn send(&self, command: Command) {
@@ -232,12 +264,20 @@ impl Controller {
                 ui.global::<AppState>().set_offline(!online);
                 if online {
                     self.request_logos(ui);
-                    self.reload_card_images(ui);
+                    self.reload_card_images(ui, Surface::Pick);
+                    self.reload_card_images(ui, Surface::Search);
+                    self.request_thumbs(ui);
+                    self.retry_failed_search(ui);
                 }
             }
             Update::Imdb(info) => {
+                let became_ready = info.ready && !self.imdb.ready;
                 self.imdb = info;
                 self.refresh_imdb_ui(ui);
+                if became_ready {
+                    // Search rows that said "Loading IMDb ratings…" can show them now.
+                    self.search_availability_changed(ui);
+                }
             }
             Update::CacheSize(bytes) => {
                 let settings = ui.global::<SettingsState>();
@@ -255,6 +295,18 @@ impl Controller {
             Update::CardImage { id, kind, pixels } => self.on_card_image(ui, id, kind, pixels),
             Update::CardImdb { id, text, badge } => self.on_card_imdb(ui, id, text, badge),
             Update::Excluded { title, reason } => self.on_excluded(ui, title, reason),
+            Update::SearchResults {
+                id,
+                page,
+                total_pages,
+                hits,
+            } => self.on_search_results(ui, id, page, total_pages, hits),
+            Update::SearchFailed { id, page, error } => self.on_search_failed(ui, id, page, error),
+            Update::SearchHitInfo { id, title, info } => self.on_search_hit_info(ui, id, title, info),
+            Update::Thumb { spec, pixels } => self.on_thumb(ui, spec, pixels),
+            Update::ThumbFailed(spec) => self.on_thumb_failed(spec),
+            Update::TitleCard { id, card } => self.on_title_card(ui, id, *card),
+            Update::TitleCardFailed { id, error } => self.on_title_card_failed(ui, id, error),
         }
     }
 
@@ -317,13 +369,32 @@ impl Controller {
         let previous = app.get_page();
         app.set_services_sheet_open(false);
         app.set_page(page);
-        // The card's decoded images are kept only while the Pick page shows.
-        if previous == Page::Pick && page != Page::Pick {
-            self.release_card_images(ui);
-        } else if page == Page::Pick && previous != Page::Pick {
-            self.reload_card_images(ui);
+        // Decoded posters, backdrops and thumbnails are kept only while their page shows.
+        if previous != page {
+            match previous {
+                Page::Pick => self.release_card_images(ui, Surface::Pick),
+                Page::Search => {
+                    self.release_card_images(ui, Surface::Search);
+                    self.release_thumbs();
+                }
+                _ => {}
+            }
+            match page {
+                Page::Pick => self.reload_card_images(ui, Surface::Pick),
+                Page::Search => {
+                    self.refresh_stale_search(ui);
+                    self.reload_card_images(ui, Surface::Search);
+                    self.request_thumbs(ui);
+                }
+                _ => {}
+            }
         }
         self.refresh_services(ui);
+    }
+
+    /// The Pick card reports its size and its poster's.
+    pub fn pick_card_resized(&mut self, ui: &AppWindow, width: f32, height: f32, poster_width: f32, poster_height: f32) {
+        self.card_resized(ui, Surface::Pick, width, height, poster_width, poster_height);
     }
 
     pub fn set_sheet_open(&mut self, ui: &AppWindow, open: bool) {
@@ -460,8 +531,14 @@ impl Controller {
                     .filter_map(|path| path.as_ref().map(|p| (p.clone(), active_px))),
             )
             .collect();
-        if ui.global::<AppState>().get_page() == Page::Pick {
-            wanted.extend(self.pick.chip_logo_paths().map(|p| (p.to_owned(), chip_px)));
+        // Chips on the card of the page that shows.
+        let card = match ui.global::<AppState>().get_page() {
+            Page::Pick => Some(Surface::Pick),
+            Page::Search => Some(Surface::Search),
+            _ => None,
+        };
+        if let Some(surface) = card {
+            wanted.extend(self.slot(surface).chip_logo_paths().map(|p| (p.to_owned(), chip_px)));
         }
         let mut requests = Vec::new();
         for (path, px) in wanted {
@@ -536,6 +613,7 @@ impl Controller {
             self.fill_variants(&group);
         }
         self.pick_inputs_changed(ui);
+        self.search_availability_changed(ui);
     }
 
     pub fn open_variants(&mut self, ui: &AppWindow, key: &str) {
@@ -575,6 +653,7 @@ impl Controller {
         self.fill_variants(&group);
         self.refresh_tile_rows(ui, &key);
         self.pick_inputs_changed(ui);
+        self.search_availability_changed(ui);
     }
 
     pub fn filter_services(&mut self, ui: &AppWindow, text: &str) {
@@ -729,6 +808,7 @@ impl Controller {
             self.refresh_services(ui);
             self.send(Command::LoadCatalog);
             self.pick_inputs_changed(ui);
+            self.search_availability_changed(ui);
         }
     }
 
@@ -757,14 +837,18 @@ impl Controller {
         }
     }
 
-    /// The window moved to a monitor with another scale: logos and the card's images are
-    /// decoded again to stay sharp.
+    /// The window moved to a monitor with another scale: logos, thumbnails and the cards'
+    /// images are decoded again to stay sharp.
     pub fn scale_changed(&mut self, ui: &AppWindow) {
         self.logos.clear();
         self.pending_logos.clear();
         self.refresh_services(ui);
-        self.release_card_images(ui);
-        self.reload_card_images(ui);
+        for surface in [Surface::Pick, Surface::Search] {
+            self.release_card_images(ui, surface);
+            self.reload_card_images(ui, surface);
+        }
+        self.release_thumbs();
+        self.request_thumbs(ui);
         self.send_poster_width(ui);
     }
 

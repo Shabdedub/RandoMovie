@@ -1,40 +1,516 @@
-// Search arrives in phase 4.
+// Search: a box, the results with their IMDb rating and where they stream, and the title
+// card for an opened result. Up and Down move through the results, Enter opens one, Esc
+// goes back.
 
+import { LineEdit, ScrollView } from "std-widgets.slint";
 import { Theme, Icons } from "../theme.slint";
-import { Card, FontIcon, PageTitle } from "../widgets.slint";
+import { AppButton, ButtonKind, FontIcon, Skeleton } from "../widgets.slint";
+import { CardMetrics, TitleCardSkeleton, TitleCardView } from "../card.slint";
+import { SearchRow, SearchState, SearchStatus } from "../state.slint";
 
-export component SearchPage inherits VerticalLayout {
-    padding: 32px;
-    spacing: 24px;
+// The thumbnail's size; the controller asks the worker for exactly this many pixels.
+export global SearchMetrics {
+    out property <length> thumb-width: 48px;
+    out property <length> thumb-height: 72px;
+    out property <length> thumb-radius: 6px;
+    out property <length> row-height: 96px;
+    out property <length> row-gap: 4px;
+}
 
-    PageTitle {
-        title: "Search";
-        subtitle: "Where can I watch it, and is it on my services?";
+component ResultRow inherits Rectangle {
+    in property <SearchRow> result;
+    in property <bool> selected;
+    // The list has keyboard focus, so the selected row shows the focus ring.
+    in property <bool> list-focused;
+    callback activate();
+
+    property <bool> available: root.result.verdict-state <= 1;
+
+    height: SearchMetrics.row-height;
+    border-radius: Theme.radius-card;
+    background: touch.pressed ? Theme.pressed
+        : touch.has-hover ? Theme.hover
+        : root.selected ? Theme.raised
+        : transparent;
+    border-width: root.selected && root.list-focused ? 2px : root.selected ? 1px : 0px;
+    border-color: root.list-focused ? Theme.accent : Theme.border;
+
+    accessible-role: list-item;
+    accessible-label: root.result.name + ", " + root.result.meta
+        + (root.result.imdb == "" ? "" : ", " + root.result.imdb)
+        + (root.result.verdict == "" ? "" : ", " + root.result.verdict);
+    accessible-item-selectable: true;
+    accessible-item-selected: root.selected;
+    accessible-action-default => {
+        root.activate();
     }
 
-    Card {
-        vertical-stretch: 1;
-        VerticalLayout {
-            padding: 32px;
-            spacing: 12px;
-            alignment: center;
-            FontIcon {
-                glyph: Icons.search;
-                font-size: 40px;
-                color: Theme.accent;
+    touch := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => {
+            root.activate();
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 16px;
+        spacing: 14px;
+        cross-axis-alignment: center;
+
+        Rectangle {
+            width: SearchMetrics.thumb-width;
+            height: SearchMetrics.thumb-height;
+            border-radius: SearchMetrics.thumb-radius;
+            background: Theme.hover;
+            if root.result.thumb.width == 0: FontIcon {
+                glyph: Icons.movies;
+                font-size: 18px;
+                color: Theme.text-disabled;
             }
+            Image {
+                source: root.result.thumb;
+                width: parent.width;
+                height: parent.height;
+                accessible-role: none;
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 5px;
             Text {
-                text: "Search arrives in phase 4";
-                font-size: Theme.subtitle;
+                text: root.result.name;
+                font-size: 15px;
                 font-weight: 600;
                 color: Theme.text;
-                horizontal-alignment: center;
+                overflow: elide;
+                accessible-role: none;
             }
+            HorizontalLayout {
+                spacing: 14px;
+                Text {
+                    text: root.result.meta;
+                    color: Theme.text-muted;
+                    horizontal-stretch: 0;
+                    accessible-role: none;
+                }
+                if root.result.imdb-state == 0: HorizontalLayout {
+                    spacing: 5px;
+                    horizontal-stretch: 0;
+                    FontIcon {
+                        glyph: Icons.star;
+                        font-size: 13px;
+                        color: Theme.star;
+                    }
+                    Text {
+                        text: root.result.imdb;
+                        color: Theme.text;
+                        vertical-alignment: center;
+                        accessible-role: none;
+                    }
+                }
+                if root.result.imdb-state != 0 && root.result.imdb != "": Text {
+                    text: root.result.imdb;
+                    color: Theme.text-muted;
+                    horizontal-stretch: 0;
+                    accessible-role: none;
+                }
+                Rectangle {
+                    horizontal-stretch: 1;
+                }
+            }
+            if root.result.verdict-state == 4: HorizontalLayout {
+                alignment: start;
+                Skeleton {
+                    width: 180px;
+                    height: 14px;
+                }
+            }
+            if root.result.verdict-state != 4: HorizontalLayout {
+                spacing: 6px;
+                FontIcon {
+                    glyph: root.available ? Icons.completed : root.result.verdict-state == 5 ? Icons.warning : Icons.info;
+                    font-size: 13px;
+                    color: root.available ? Theme.success : Theme.text-muted;
+                }
+                Text {
+                    text: root.result.verdict;
+                    color: root.available ? Theme.text : Theme.text-muted;
+                    font-weight: root.available ? 600 : 400;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                    accessible-role: none;
+                }
+            }
+        }
+    }
+}
+
+// Static placeholder rows while the first page loads.
+component SkeletonRow inherits HorizontalLayout {
+    height: SearchMetrics.row-height;
+    padding-left: 12px;
+    spacing: 14px;
+    cross-axis-alignment: center;
+    Skeleton {
+        width: SearchMetrics.thumb-width;
+        height: SearchMetrics.thumb-height;
+        border-radius: SearchMetrics.thumb-radius;
+    }
+    VerticalLayout {
+        alignment: center;
+        cross-axis-alignment: start;
+        spacing: 8px;
+        Skeleton {
+            width: 240px;
+            height: 16px;
+        }
+        Skeleton {
+            width: 160px;
+            height: 13px;
+        }
+        Skeleton {
+            width: 200px;
+            height: 13px;
+        }
+    }
+}
+
+// A centred message in the results area: before searching, no results, or an error.
+component Notice inherits VerticalLayout {
+    in property <string> icon;
+    in property <string> title;
+    in property <string> body;
+    in property <string> action;
+    callback act();
+    alignment: center;
+    spacing: 12px;
+    padding: 32px;
+    FontIcon {
+        glyph: root.icon;
+        font-size: 40px;
+        color: Theme.accent;
+    }
+    Text {
+        text: root.title;
+        font-size: Theme.subtitle;
+        font-weight: 600;
+        color: Theme.text;
+        horizontal-alignment: center;
+        wrap: word-wrap;
+    }
+    if root.body != "": Text {
+        text: root.body;
+        color: Theme.text-muted;
+        horizontal-alignment: center;
+        wrap: word-wrap;
+    }
+    if root.action != "": HorizontalLayout {
+        alignment: center;
+        AppButton {
+            text: root.action;
+            clicked => {
+                root.act();
+            }
+        }
+    }
+}
+
+export component SearchPage inherits Rectangle {
+    // Ctrl+F while Search already shows puts the cursor back in the box.
+    property <int> focus-request: SearchState.focus-request;
+    changed focus-request => {
+        box.focus();
+    }
+    // An opened card takes the focus, so Esc closes it. Closing it with Back or Esc returns
+    // the focus to the list (typing a new query closes it without moving the focus).
+    property <bool> card-open: SearchState.card-open;
+    changed card-open => {
+        if (self.card-open) {
+            card-scope.focus();
+        }
+    }
+    property <int> results-serial: SearchState.results-serial;
+    changed results-serial => {
+        list.content-y = 0;
+    }
+
+    function close-card() {
+        SearchState.close-card();
+        root.enter-results();
+    }
+
+    function report-size() {
+        let poster-height = CardMetrics.poster-height(card-slot.width, card-slot.height);
+        SearchState.card-resized(card-slot.width, card-slot.height, poster-height * 2 / 3, poster-height);
+    }
+
+    // Selects a result and scrolls it into view.
+    function select(index: int) {
+        if (SearchState.rows.length == 0) {
+            return;
+        }
+        let i = max(0, min(index, SearchState.rows.length - 1));
+        SearchState.selected = i;
+        let step = SearchMetrics.row-height + SearchMetrics.row-gap;
+        let top = i * step;
+        // The last row brings "Load more" into view with it.
+        let bottom = top + SearchMetrics.row-height
+            + (i == SearchState.rows.length - 1 && SearchState.has-more ? 64px : 0px);
+        if (top < -list.content-y) {
+            list.content-y = -top;
+        } else if (bottom > -list.content-y + list.visible-height) {
+            list.content-y = -(bottom - list.visible-height);
+        }
+    }
+
+    function enter-results() {
+        if (SearchState.rows.length > 0 && !SearchState.card-open) {
+            root.select(max(0, SearchState.selected));
+            results-scope.focus();
+        }
+    }
+
+    init => {
+        box.focus();
+        root.report-size();
+    }
+
+    VerticalLayout {
+        padding: 24px;
+        padding-top: 20px;
+        spacing: 14px;
+
+        // Down leaves the box for the results. It's caught before the box sees it, because
+        // the box would use it to move its cursor.
+        FocusScope {
+            capture-key-pressed(event) => {
+                if (event.text == Key.DownArrow && SearchState.rows.length > 0 && !SearchState.card-open) {
+                    root.enter-results();
+                    return accept;
+                }
+                reject
+            }
+            HorizontalLayout {
+                box := LineEdit {
+                    placeholder-text: "Search movies and series";
+                    input-type: InputType.search;
+                    accessible-label: "Search movies and series";
+                    text <=> SearchState.text;
+                    edited(text) => {
+                        SearchState.edited(text);
+                    }
+                    accepted => {
+                        SearchState.submitted();
+                    }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 12px;
+            height: 20px;
             Text {
-                text: "You'll be able to look up any movie or series and see its IMDb rating and where it streams in your region.";
+                text: SearchState.heading;
                 color: Theme.text-muted;
-                horizontal-alignment: center;
-                wrap: word-wrap;
+                overflow: elide;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            if SearchState.searching: Text {
+                text: "Searching…";
+                color: Theme.text-muted;
+                vertical-alignment: center;
+            }
+        }
+
+        stage := Rectangle {
+            vertical-stretch: 1;
+            min-height: 240px;
+
+            results-scope := FocusScope {
+                x: 0;
+                y: 0;
+                width: parent.width;
+                height: parent.height;
+                visible: !SearchState.card-open;
+                key-pressed(event) => {
+                    if (event.text == Key.DownArrow) {
+                        // Past the last row, the next page loads.
+                        if (SearchState.selected >= SearchState.rows.length - 1 && SearchState.has-more) {
+                            SearchState.load-more();
+                        } else {
+                            root.select(SearchState.selected + 1);
+                        }
+                        return accept;
+                    }
+                    if (event.text == Key.UpArrow) {
+                        if (SearchState.selected <= 0) {
+                            box.focus();
+                        } else {
+                            root.select(SearchState.selected - 1);
+                        }
+                        return accept;
+                    }
+                    if (event.text == Key.Home) {
+                        root.select(0);
+                        return accept;
+                    }
+                    if (event.text == Key.End) {
+                        root.select(SearchState.rows.length - 1);
+                        return accept;
+                    }
+                    if (event.text == Key.PageDown || event.text == Key.PageUp) {
+                        let page = max(1, floor(list.visible-height / (SearchMetrics.row-height + SearchMetrics.row-gap)));
+                        root.select(SearchState.selected + (event.text == Key.PageDown ? page : -page));
+                        return accept;
+                    }
+                    if (event.text == Key.Return || event.text == Key.Space) {
+                        if (SearchState.selected >= 0) {
+                            SearchState.open(SearchState.selected);
+                        }
+                        return accept;
+                    }
+                    if (event.text == Key.Escape) {
+                        box.focus();
+                        return accept;
+                    }
+                    reject
+                }
+
+                list := ScrollView {
+                    visible: SearchState.rows.length > 0;
+                    accessible-role: AccessibleRole.list;
+                    accessible-label: "Search results";
+                    VerticalLayout {
+                        alignment: start;
+                        spacing: SearchMetrics.row-gap;
+                        padding-right: 12px;
+                        for row[index] in SearchState.rows: ResultRow {
+                            result: row;
+                            selected: index == SearchState.selected;
+                            list-focused: results-scope.has-focus;
+                            activate => {
+                                SearchState.selected = index;
+                                SearchState.open(index);
+                            }
+                        }
+                        if SearchState.has-more: HorizontalLayout {
+                            alignment: center;
+                            padding-top: 8px;
+                            padding-bottom: 16px;
+                            AppButton {
+                                text: "Load more results";
+                                icon: Icons.chevron-down;
+                                busy: SearchState.loading-more;
+                                clicked => {
+                                    SearchState.load-more();
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if SearchState.rows.length == 0 && SearchState.status == SearchStatus.searching: VerticalLayout {
+                    alignment: start;
+                    spacing: SearchMetrics.row-gap;
+                    for placeholder in 6: SkeletonRow { }
+                }
+                if SearchState.rows.length == 0 && SearchState.status == SearchStatus.idle: Notice {
+                    icon: Icons.search;
+                    title: "Search for a movie or series";
+                    body: SearchState.intro;
+                }
+                if SearchState.rows.length == 0 && SearchState.status == SearchStatus.empty: Notice {
+                    icon: Icons.search;
+                    title: "No matches";
+                    body: SearchState.message;
+                }
+                if SearchState.rows.length == 0 && SearchState.status == SearchStatus.failed: Notice {
+                    icon: Icons.info;
+                    title: "Search didn't work";
+                    body: SearchState.message;
+                    action: "Try again";
+                    act => {
+                        SearchState.retry();
+                    }
+                }
+            }
+
+            // The opened result. It's always laid out, so its size is known before it opens.
+            card-scope := FocusScope {
+                x: 0;
+                y: 0;
+                width: parent.width;
+                height: parent.height;
+                visible: SearchState.card-open;
+                enabled: SearchState.card-open;
+                key-pressed(event) => {
+                    if (event.text == Key.Escape) {
+                        root.close-card();
+                        return accept;
+                    }
+                    reject
+                }
+                VerticalLayout {
+                    spacing: 12px;
+                    HorizontalLayout {
+                        alignment: start;
+                        AppButton {
+                            text: "Back to results";
+                            icon: Icons.back;
+                            kind: ButtonKind.subtle;
+                            clicked => {
+                                root.close-card();
+                            }
+                        }
+                    }
+                    card-slot := Rectangle {
+                        vertical-stretch: 1;
+                        changed width => {
+                            root.report-size();
+                        }
+                        changed height => {
+                            root.report-size();
+                        }
+                        if SearchState.card-open && SearchState.card-loading: TitleCardSkeleton { }
+                        if SearchState.card-open && !SearchState.card-loading && SearchState.card-error != "": Rectangle {
+                            border-radius: Theme.radius-card;
+                            background: Theme.surface;
+                            border-width: 1px;
+                            border-color: Theme.border;
+                            Notice {
+                                icon: Icons.info;
+                                title: "This title didn't load";
+                                body: SearchState.card-error;
+                            }
+                        }
+                        if SearchState.card-open && !SearchState.card-loading && SearchState.card-error == "": TitleCardView {
+                            data: SearchState.card;
+                            groups: SearchState.groups;
+                            poster: SearchState.poster;
+                            backdrop: SearchState.backdrop;
+                            serial: SearchState.card-serial;
+                            open-link => {
+                                SearchState.open-where-to-watch();
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Screen readers hear about results and opened titles.
+            Text {
+                x: 0;
+                y: 0;
+                width: 1px;
+                height: 1px;
+                text: SearchState.announcement;
+                color: transparent;
+                accessible-role: AccessibleRole.text;
+                accessible-label: SearchState.announcement;
+                accessible-live-region: AccessibleLiveness.polite;
             }
         }
     }

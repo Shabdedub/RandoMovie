@@ -15,13 +15,12 @@ non-commercial use.
 | 1 | Data layer: TMDB client, IMDb pipeline, storage, eligibility and picker | Done |
 | 2 | UI shell: navigation, theming, settings, first-run flow, My Services | Done |
 | 3 | Pick screen: verification, filters, history, exclusions, prefetch | Done |
-| 4 | Search and the shared title card | Next |
-| 5 | Polish, accessibility, performance measurement, final README | Planned |
+| 4 | Search and the shared title card | Done |
+| 5 | Polish, accessibility, performance measurement, final README | Next |
 
-Everything except Search works: first run, the Pick screen with its title card, My Services,
-Settings and About. The Search page says that phase 4 brings it.
+Every screen works: first run, Pick, Search, My Services, Settings and About.
 
-Known gap: `RandoMovie.exe` is 16.38 MB, over the 15 MB budget. Phase 5 trims it;
+Known gap: `RandoMovie.exe` is 16.85 MB, over the 15 MB budget. Phase 5 trims it;
 PERFORMANCE.md has the breakdown and the plan.
 
 ## Prerequisites
@@ -93,11 +92,25 @@ floor, clear the cache, refresh the IMDb ratings, and change or remove the token
 - **Previous** steps back through this session's picks. **Seen it** and **Not interested**
   keep a title out of future picks, and **Undo** takes that back.
 
+## Search
+
+- **Type a title.** Results appear 300 ms after you stop typing, movies and series only.
+- **Each result** shows its poster, year and type, its IMDb rating, and where it streams in your
+  region: "Included with Stan", "Free on SBS On Demand", "Not on your services" or "Not
+  available to stream". These load in the background, top rows first.
+- **Open a result** for the same title card as on Pick. **Back to results** or Esc returns to
+  the list where you left it.
+- **Load more results** fetches the next page. With the keyboard, Down on the last result does
+  the same.
+
 | Key | Action |
 |---|---|
-| Space or Enter | Pick again, when no button or field has focus |
-| Ctrl+F | Open Search |
-| Esc | Close the open panel or the side sheet, or leave a text field |
+| Space or Enter | Pick again on the Pick screen, when no button or field has focus |
+| Ctrl+F | Go to Search, cursor in the box |
+| Down / Up | In Search: from the box into the results, then from result to result |
+| Home, End, Page Up, Page Down | In Search: jump through the results |
+| Enter | In Search: open the selected result |
+| Esc | Close the open panel, side sheet or result; otherwise leave a text field |
 
 ## Where data lives
 
@@ -128,6 +141,8 @@ downloads are reused.
 - **Picker.** It samples uniformly from TMDB discover results for your services and for free
   titles. It then verifies each candidate against availability data under 24 hours old before
   returning it.
+- **Search.** TMDB's multi-search, movies and series only. Each row then gets the same details
+  the title card uses, cached for 24 hours, for its rating and where it streams.
 - **Storage.** SQLite holds the caches, history and exclusions. Settings are versioned JSON,
   saved atomically.
 
@@ -178,6 +193,18 @@ The spec left these points open. Each choice favours fast, light and predictable
   watch" heading, with "Open where to watch" beside it, so both stay in view.
 - **Failed picks.** The card area explains what happened and offers one way out: Reset
   filters, Choose services, Add token or Try again. "Previous" then returns to the last card.
+- **Ratings and availability in the results.** The spec lists thumbnail, title, year and type
+  for each result. Each row also shows the IMDb rating and the verdict line, so the list
+  itself answers "is it on my services?" and every title shown carries its rating. Rows load
+  their details four at a time; a new query stops the old one's requests.
+- **Search queries** need two characters. A single letter matches too much to be useful.
+- **Search and the card.** Typing a new query closes an open result. Leaving Search keeps the
+  query and results but frees their images, which reload when you come back. A change of
+  services or region updates the rows and the open card the next time Search shows.
+- **Offline search.** Earlier searches and titles come from the cache, under the offline
+  banner. A search that failed offline runs again by itself when the connection returns.
+- **Title card on Search.** It's the Pick screen's card without "Seen it" and "Not
+  interested", which belong to picking.
 - **Obscurity floor.** Settings offers Any, 25, 50 (default), 100, 250, 500 and 1,000 TMDB votes.
   A different value typed into `settings.json` is kept and shown as an extra choice.
 - **Pool sizes.** TMDB now reports at most 20,001 results and serves at most 500 pages, so a
@@ -213,21 +240,20 @@ The spec left these points open. Each choice favours fast, light and predictable
 
 ## Acceptance checks
 
-Phase 3 ran the checks through the app itself on 2026-10-11, region AU, with the release build.
-A UI Automation script pressed "Pick again" and read each card from the accessibility tree, as
-a screen reader would. Each profile started with an empty cache.
+Phase 4 ran all four checks through the app itself on 2026-10-11, region AU, with the release
+build. UI Automation scripts typed into the search box or pressed "Pick again", and read each
+row or card from the accessibility tree, as a screen reader would. Each profile started with an
+empty cache.
 
 | Check | Result |
 |---|---|
 | One service (Netflix), free titles off: 30 consecutive picks show it under "On your services" | Pass: 30 of 30 read "Included with Netflix" with Netflix under "On your services", no repeats |
 | No services, free titles on: every pick shows a Free provider | Pass: 20 of 20 read "Free on …" with a Free group, 5 of them series |
-| Search a well-known film for its IMDb rating and AU availability in about a second | Data layer, phase 1: "The Matrix", ★ 8.7 IMDb · 2.3M votes, AU offers, 511 ms cold. The Search screen comes in phase 4 |
-| Idle 60 s with a pick on screen: 0 % CPU, memory within budget | Pass: 0 ms of CPU across all threads in 60 s, twice; 23 to 25 MB private bytes after 30 titles |
+| Search a well-known film for its IMDb rating and AU availability in about a second | Pass: "The Matrix" row with ★ 8.7 IMDb · 2.3M votes and its AU verdict 710 ms after typing, including the 300 ms pause; its card opens with all AU offers |
+| Idle 60 s with a pick on screen: 0 % CPU, memory within budget | Pass: 0 ms of CPU across all threads in 60 s; 27 MB private bytes after 30 picks, 23 MB after a further 59 search results and 6 opened titles |
 
-Every one of those 50 picks came from the pick prepared in the background. After the first card
-of each run, each card appeared 3 to 6 ms after the click, poster included. The first cards
-took 393 and 250 ms because their posters weren't downloaded in advance. That is fixed, and a
-first pick after a cold start now takes 8 ms. PERFORMANCE.md has the details.
+Every one of those 50 picks came from the pick prepared in the background, and each card
+appeared 7 to 11 ms after the click, poster included. PERFORMANCE.md has the details.
 
 The live tests repeat the first three checks at the data level:
 

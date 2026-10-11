@@ -180,7 +180,7 @@ impl Worker {
         Ok(PickRequest::from_settings(&settings, &region, media, services, &genres))
     }
 
-    async fn catalog_for(self: &Rc<Self>, region: &str) -> Result<Rc<ServiceCatalog>, ApiError> {
+    pub(super) async fn catalog_for(self: &Rc<Self>, region: &str) -> Result<Rc<ServiceCatalog>, ApiError> {
         let current = self.catalog.borrow().clone();
         match current {
             Some(catalog) if catalog.region == region => Ok(catalog),
@@ -383,7 +383,7 @@ impl Worker {
     }
 
     /// The card for the current region, services and catalog.
-    fn build_card(&self, details: &TitleDetails, imdb: &ImdbStatus) -> TitleCard {
+    pub(super) fn build_card(&self, details: &TitleDetails, imdb: &ImdbStatus) -> TitleCard {
         let region = self.effective_region();
         let catalog = self
             .catalog

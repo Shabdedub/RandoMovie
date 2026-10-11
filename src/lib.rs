@@ -10,6 +10,7 @@ pub mod paths;
 pub mod picker;
 #[cfg(windows)]
 pub mod platform;
+pub mod search;
 pub mod services;
 pub mod store;
 pub mod tmdb;

@@ -1,18 +1,44 @@
 # Performance
 
-Measurements are taken on release builds. This file grows with each phase: the UI shell is
-measured from phase 2, and phase 5 repeats every budget with picks on screen. Sizes use binary
-units, as Windows Explorer shows them: 1 MB is 1,048,576 bytes.
+Measurements are taken on release builds. This file grows with each phase, newest first: the
+UI shell is measured from phase 2, and phase 5 repeats every budget. Sizes use binary units, as
+Windows Explorer shows them: 1 MB is 1,048,576 bytes.
 
 ## Budgets from the spec
 
 | Budget | Target | Status |
 |---|---|---|
-| Idle CPU | 0 % | 0 ms of CPU in 60 s with a pick on screen (phase 3) |
-| Private working set after about 20 titles | under 50 MB | 23 to 25 MB private bytes after 30 titles (phase 3) |
-| Window interactive after launch | within 0.5 s | Visible after 120 to 140 ms (phase 2); first frame after 61 to 103 ms in phase 3 |
-| `RandoMovie.exe` size | under 15 MB | **16.38 MB, over by 1.38 MB.** Phase 5 trims it; see "Exe size" below |
+| Idle CPU | 0 % | 0 ms of CPU in 60 s with a pick on screen, and with search results on screen (phase 4) |
+| Private working set after about 20 titles | under 50 MB | 27 MB private bytes after 30 picks; 23 MB after a further 59 search results and 6 opened titles (phase 4) |
+| Window interactive after launch | within 0.5 s | Visible after 120 to 140 ms (phase 2); first frame 69 to 84 ms after launch in phase 4's four runs |
+| `RandoMovie.exe` size | under 15 MB | **16.85 MB, over by 1.85 MB.** Phase 5 trims it; see "Exe size" under phases 3 and 4 |
 | IMDb rebuild peak memory | "modest" | About 2 MB extra, see below |
+
+## Phase 4: Search
+
+Measured on 2026-10-11 with the release build on the same machine and connection, region AU.
+UI Automation typed into the search box and read the rows and cards from the accessibility
+tree; the app's log timed each step.
+
+| Measurement | Result |
+|---|---|
+| Typing "The Matrix" to its row on screen, cold cache, measured from outside | 541 ms |
+| Typing to that row's IMDb rating and AU verdict, cold cache, measured from outside | 710 ms |
+| Search sent to results on screen / to the first row's rating and verdict, from the app's log | 177 ms / 385 ms |
+| The same query again (cache) | 0 ms to results, 4 ms to the first rating and verdict |
+| "Load more": next page on screen | 222 to 262 ms |
+| Idle for 60 s with 59 results on screen, all threads | 0 ms of CPU |
+| Private bytes after 30 picks, 59 search results and 6 opened titles | 23.0 MB |
+| Click to new card on screen on Pick, poster included (50 picks, two profiles) | 7 to 11 ms |
+
+The 300 ms between the last keystroke and the request is the spec's debounce; everything
+after it is network time on a cold cache. Each row's details are the same call the title card
+uses, so opening a result is a cache hit and only the poster has to download.
+
+### Exe size
+
+Search added 0.47 MB, to 16.85 MB (17,668,096 bytes): a page, a worker module and its
+messages, and the card code now shared by both pages. Phase 5 has to win back about 1.9 MB.
 
 ## Phase 3: Pick screen
 

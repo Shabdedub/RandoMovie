@@ -17,7 +17,7 @@ use slint::winit_030::winit;
 
 use crate::worker::{self, Command, Sink};
 use crate::{
-    AppState, AppWindow, Exclusion, OnboardingState, Page, PickState, ServicesState,
+    AppState, AppWindow, Exclusion, OnboardingState, Page, PickState, SearchState, ServicesState,
     SettingsState, Theme, TokenForm,
 };
 use controller::Controller;
@@ -365,7 +365,19 @@ fn wire_callbacks(ui: &AppWindow, controller: &Rc<RefCell<Controller>>) {
     pick.on_run_error_action(handler!(controller, weak, |c, ui| c.run_error_action(&ui)));
     pick.on_open_where_to_watch(handler!(controller, weak, |c, ui| c.open_where_to_watch(&ui)));
     pick.on_card_resized(handler!(controller, weak, |c, ui, width: f32, height: f32, poster_width: f32, poster_height: f32| c
-        .card_resized(&ui, width, height, poster_width, poster_height)));
+        .pick_card_resized(&ui, width, height, poster_width, poster_height)));
+
+    let search = ui.global::<SearchState>();
+    search.on_edited(handler!(controller, weak, |c, ui, text: slint::SharedString| c
+        .search_edited(&ui, &text)));
+    search.on_submitted(handler!(controller, weak, |c, ui| c.search_submitted(&ui)));
+    search.on_open(handler!(controller, weak, |c, ui, index: i32| c.open_result(&ui, index)));
+    search.on_close_card(handler!(controller, weak, |c, ui| c.close_card(&ui)));
+    search.on_load_more(handler!(controller, weak, |c, ui| c.search_load_more(&ui)));
+    search.on_retry(handler!(controller, weak, |c, ui| c.search_retry(&ui)));
+    search.on_open_where_to_watch(handler!(controller, weak, |c, ui| c.search_open_link(&ui)));
+    search.on_card_resized(handler!(controller, weak, |c, ui, width: f32, height: f32, poster_width: f32, poster_height: f32| c
+        .search_card_resized(&ui, width, height, poster_width, poster_height)));
 
     let settings = ui.global::<SettingsState>();
     settings.on_region_selected(handler!(controller, weak, |c, ui, index: i32| c

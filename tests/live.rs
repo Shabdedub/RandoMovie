@@ -20,6 +20,7 @@ use randomovie::format;
 use randomovie::imdb::{ImdbRatings, ImdbStatus, RefreshOutcome};
 use randomovie::media::{MediaChoice, MediaType, TitleRef};
 use randomovie::paths::AppPaths;
+use randomovie::search;
 use randomovie::picker::genres::unify;
 use randomovie::picker::{
     ChipGroupKind, PickRequest, Picker, SkipList, UnifiedGenre, Verdict, reverify, where_to_watch,
@@ -274,6 +275,20 @@ fn acceptance_search_shows_rating_and_availability_fast() {
             .unwrap();
         let rating = live.imdb.lookup(details.imdb_id.as_deref());
         let elapsed = started.elapsed();
+
+        // The Search screen's rows: movies and series only, each with rating and verdict.
+        let hits = search::hits(&page, &mut HashSet::new());
+        assert!(!hits.is_empty() && hits.len() <= page.results.len());
+        assert_eq!(hits[0].meta(), "Movie · 1999");
+        let catalog = live.catalog().await;
+        let stan: HashSet<u32> = catalog
+            .find("Stan")
+            .map(|g| g.variant_ids().collect())
+            .unwrap_or_default();
+        let info = search::hit_info(&card::build(&details, &rating, &stan, &catalog, "Australia"));
+        assert!(info.imdb.starts_with("★ "), "{}", info.imdb);
+        assert!(!info.verdict.is_empty());
+        println!("first row: {} | {} | {}", hits[0].name, info.imdb, info.verdict);
         println!(
             "search + details + rating in {} ms: {} · {}",
             elapsed.as_millis(),

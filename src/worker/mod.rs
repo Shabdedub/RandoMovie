@@ -5,19 +5,21 @@
 mod images;
 mod messages;
 mod pick;
+mod search;
 
 pub use messages::{
     CardImageKind, Command, ImageSpec, ImdbInfo, LogoRequest, TokenSource, TokenStatus, Update,
 };
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
 use randomovie::error::ApiError;
 use randomovie::imdb::{ImdbError, ImdbRatings, RefreshOutcome};
-use randomovie::media::MediaType;
+use randomovie::media::{MediaType, TitleRef};
 use randomovie::paths::AppPaths;
 use randomovie::picker::{Picker, UnifiedGenre};
 use randomovie::platform::{credentials, region};
@@ -117,6 +119,10 @@ struct Worker {
     picker: Picker,
     session: RefCell<pick::Session>,
     prefetch: RefCell<Option<pick::Prefetch>>,
+    /// The newest search; work for older ones stops.
+    search_latest: Cell<u64>,
+    /// Titles listed so far for that search, so "Load more" never repeats one.
+    search_seen: RefCell<HashSet<TitleRef>>,
 }
 
 impl Worker {
@@ -144,6 +150,8 @@ impl Worker {
             picker: Picker::new(),
             session: RefCell::new(pick::Session::default()),
             prefetch: RefCell::new(None),
+            search_latest: Cell::new(0),
+            search_seen: RefCell::new(HashSet::new()),
         }
     }
 
@@ -187,6 +195,10 @@ impl Worker {
                 poster,
                 backdrop,
             } => self.load_card_images(id, poster, backdrop),
+            Command::Search { id, query, page } => self.search(id, query, page).await,
+            Command::SearchInfo { id, titles } => self.load_row_info(id, titles).await,
+            Command::LoadThumbs(specs) => self.load_thumbs(specs),
+            Command::OpenTitle { id, title } => self.open_title(id, title).await,
             Command::SaveSettings(_) | Command::Shutdown => {}
         }
     }

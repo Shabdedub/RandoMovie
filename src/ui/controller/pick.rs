@@ -1,6 +1,6 @@
-//! The Pick screen on the UI thread: pick and "Previous" requests, the card on screen and its
-//! images, the filter bar, and scheduling the background pick that keeps "Pick again"
-//! instant.
+//! The Pick screen on the UI thread: pick and "Previous" requests, the filter bar, and
+//! scheduling the background pick that keeps "Pick again" instant. The card itself is a
+//! `CardSlot` (see `card.rs`).
 
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -9,31 +9,21 @@ use randomovie::card::{ImdbBadge, TitleCard};
 use randomovie::error::ApiError;
 use randomovie::format;
 use randomovie::media::{MediaChoice, TitleRef};
+use randomovie::picker::PickError;
 use randomovie::picker::filters::{self, DECADES, RATINGS, RUNTIMES, VOTES};
-use randomovie::picker::{ChipGroupKind, PickError, Verdict};
-use randomovie::platform;
 use randomovie::services::SelectionState;
 use randomovie::store::{ExclusionReason, Filters};
-use randomovie::{log_info, log_warn};
-use slint::{ComponentHandle, Model, ModelRc, SharedPixelBuffer, Rgba8Pixel, SharedString, Timer, TimerMode, VecModel};
+use randomovie::log_info;
+use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, VecModel};
 
-use super::{Controller, logo_key};
-use crate::worker::{CardImageKind, Command, ImageSpec};
-use crate::{
-    AppState, AppWindow, CardMetrics, Exclusion, GenreOption, Page, PickState, PickStatus, Theme,
-    TitleCardData, WatchChip, WatchGroup,
-};
+use super::Controller;
+use super::card::{CardSlot, Surface, card_data, write_card};
+use crate::worker::Command;
+use crate::{AppWindow, Exclusion, GenreOption, PickState, PickStatus};
 
-/// Logo size on the "Where to watch" chips, in logical pixels.
-pub(super) const CHIP_LOGO: f32 = 24.0;
 /// An answer within this time replaces the card directly (a prepared pick is instant); a
 /// slower one shows placeholders first.
-const PLACEHOLDER_DELAY: Duration = Duration::from_millis(150);
-/// A new card waits this long for its poster, so text and poster appear together; a
-/// poster that takes longer (not yet downloaded) appears when it arrives.
-const POSTER_WAIT: Duration = Duration::from_millis(250);
-/// The card's images are decoded again for a new size once resizing pauses this long.
-const RESIZE_SETTLE: Duration = Duration::from_millis(150);
+pub(super) const PLACEHOLDER_DELAY: Duration = Duration::from_millis(150);
 /// Changes to filters or services are collected this long before the next pick is prepared.
 const PREFETCH_SETTLE: Duration = Duration::from_millis(600);
 
@@ -52,37 +42,15 @@ enum ErrorAction {
     Retry,
 }
 
-/// The card's size and its poster's, in logical pixels.
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct CardBox {
-    width: f32,
-    height: f32,
-    poster_width: f32,
-    poster_height: f32,
-}
-
-/// The images last requested for the card on screen, in physical pixels.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ImagesRequested {
-    id: u64,
-    poster: (u32, u32),
-    backdrop: (u32, u32),
-}
-
-struct ShownCard {
-    id: u64,
-    card: TitleCard,
-    excluded: Option<ExclusionReason>,
-}
-
 pub(super) struct PickView {
-    next_id: u64,
+    /// The card on screen (kept while an error shows, so "Previous" can return to it).
+    pub(super) card: CardSlot,
+    /// "Seen it" / "Not interested" for that card.
+    excluded: Option<ExclusionReason>,
     /// The request waiting for an answer.
     pending: Option<(u64, Request)>,
     /// When the last request was made, for the log's click-to-card time.
     requested_at: Option<Instant>,
-    /// The card on screen (kept while an error shows, so "Previous" can return to it).
-    shown: Option<ShownCard>,
     /// The worker has an earlier pick before the card on screen.
     earlier: bool,
     /// Movies / Series / Both: starts at the default type, not saved.
@@ -90,52 +58,27 @@ pub(super) struct PickView {
     /// Unified genre names from TMDB.
     genres: Vec<String>,
     genre_options: Rc<VecModel<GenreOption>>,
-    card_box: Option<CardBox>,
     /// The poster width last told to the worker, in physical pixels.
     poster_width_sent: Option<u32>,
-    images: Option<ImagesRequested>,
-    /// `shown` arrived but waits for its poster before it replaces the screen.
-    awaiting_poster: bool,
-    /// Images decoded for `shown` while it waits.
-    held_poster: Option<slint::Image>,
-    held_backdrop: Option<slint::Image>,
-    groups: Rc<VecModel<WatchGroup>>,
-    chip_models: Vec<Rc<VecModel<WatchChip>>>,
-    /// Logo path of each chip, per group.
-    chip_logos: Vec<Vec<Option<String>>>,
     error_action: Option<ErrorAction>,
-    serial: i32,
     placeholder_timer: Timer,
-    poster_timer: Timer,
-    resize_timer: Timer,
     prefetch_timer: Timer,
 }
 
 impl PickView {
     pub(super) fn new(media: MediaChoice) -> PickView {
         PickView {
-            next_id: 0,
+            card: CardSlot::new(),
+            excluded: None,
             pending: None,
             requested_at: None,
-            shown: None,
             earlier: false,
             media,
             genres: Vec::new(),
             genre_options: Rc::new(VecModel::default()),
-            card_box: None,
             poster_width_sent: None,
-            images: None,
-            awaiting_poster: false,
-            held_poster: None,
-            held_backdrop: None,
-            groups: Rc::new(VecModel::default()),
-            chip_models: Vec::new(),
-            chip_logos: Vec::new(),
             error_action: None,
-            serial: 0,
             placeholder_timer: Timer::default(),
-            poster_timer: Timer::default(),
-            resize_timer: Timer::default(),
             prefetch_timer: Timer::default(),
         }
     }
@@ -146,11 +89,6 @@ impl PickView {
 
     pub(super) fn set_media(&mut self, media: MediaChoice) {
         self.media = media;
-    }
-
-    /// Logo paths of the chips on screen.
-    pub(super) fn chip_logo_paths(&self) -> impl Iterator<Item = &str> {
-        self.chip_logos.iter().flatten().filter_map(|path| path.as_deref())
     }
 }
 
@@ -180,41 +118,6 @@ fn exclusion(reason: Option<ExclusionReason>) -> Exclusion {
         None => Exclusion::None,
         Some(ExclusionReason::Seen) => Exclusion::Seen,
         Some(ExclusionReason::NotInterested) => Exclusion::NotInterested,
-    }
-}
-
-fn group_kind(kind: ChipGroupKind) -> i32 {
-    match kind {
-        ChipGroupKind::YourServices => 0,
-        ChipGroupKind::Free => 1,
-        ChipGroupKind::OtherSubscriptions => 2,
-        ChipGroupKind::RentBuy => 3,
-    }
-}
-
-/// The card's text for Slint. The IMDb star is drawn as an icon, so the text drops it.
-fn card_data(card: &TitleCard) -> TitleCardData {
-    TitleCardData {
-        name: card.name.as_str().into(),
-        year: card.year.as_str().into(),
-        kind: card.kind.into(),
-        facts: card.facts.as_str().into(),
-        overview: card.overview.as_str().into(),
-        imdb: card.imdb.trim_start_matches('★').trim_start().into(),
-        imdb_state: match card.imdb_badge {
-            ImdbBadge::Rated => 0,
-            ImdbBadge::Unavailable => 1,
-            ImdbBadge::Loading => 2,
-        },
-        verdict: card.verdict.as_str().into(),
-        verdict_state: match card.watch.verdict {
-            Verdict::Included(_) => 0,
-            Verdict::Free(_) => 1,
-            Verdict::NotOnServices => 2,
-            Verdict::Unavailable => 3,
-        },
-        region_name: card.region_name.as_str().into(),
-        link: card.watch.link.as_deref().unwrap_or_default().into(),
     }
 }
 
@@ -262,7 +165,7 @@ fn action_label(action: ErrorAction) -> &'static str {
 impl Controller {
     pub(super) fn init_pick(&mut self, ui: &AppWindow) {
         let state = ui.global::<PickState>();
-        state.set_groups(ModelRc::from(self.pick.groups.clone()));
+        state.set_groups(self.pick.card.groups_model());
         state.set_genres(ModelRc::from(self.pick.genre_options.clone()));
         state.set_rating_options(string_model(filters::labels(&RATINGS)));
         state.set_votes_options(string_model(filters::labels(&VOTES)));
@@ -270,27 +173,6 @@ impl Controller {
         state.set_status(PickStatus::Idle);
         self.refresh_filter_bar(ui, true);
         self.refresh_idle_message(ui);
-    }
-
-    /// Runs `action` after `delay`, replacing whatever `timer` was waiting to do.
-    fn later(
-        timer: &Timer,
-        weak: &slint::Weak<AppWindow>,
-        delay: Duration,
-        action: impl FnOnce(&mut Controller, &AppWindow) + 'static,
-    ) {
-        let weak = weak.clone();
-        let mut action = Some(action);
-        timer.start(TimerMode::SingleShot, delay, move || {
-            if let Some(action) = action.take() {
-                crate::ui::with_controller(&weak, action);
-            }
-        });
-    }
-
-    fn pick_visible(ui: &AppWindow) -> bool {
-        let app = ui.global::<AppState>();
-        !app.get_onboarding() && app.get_page() == Page::Pick
     }
 
     // ---- Requests ----------------------------------------------------------------------
@@ -308,8 +190,9 @@ impl Controller {
             return;
         }
         // After a failed pick, "Previous" first returns to the card that was on screen.
-        if ui.global::<PickState>().get_status() == PickStatus::Failed && self.pick.shown.is_some() {
-            self.show_card(ui);
+        if ui.global::<PickState>().get_status() == PickStatus::Failed && self.pick.card.card().is_some() {
+            self.show_pick_state(ui);
+            self.show_slot(ui, Surface::Pick);
             return;
         }
         if self.pick.earlier {
@@ -319,15 +202,14 @@ impl Controller {
 
     /// Sends a request; a newer one replaces any still waiting.
     fn start_request(&mut self, ui: &AppWindow, request: Request) {
-        self.pick.next_id += 1;
-        let id = self.pick.next_id;
+        let id = self.next_request_id();
         self.pick.pending = Some((id, request));
         self.pick.requested_at = Some(Instant::now());
         let state = ui.global::<PickState>();
         state.set_busy(request == Request::Pick);
         state.set_can_go_back(false);
         Self::later(&self.pick.placeholder_timer, &self.weak, PLACEHOLDER_DELAY, move |c, ui| {
-            c.show_placeholder(ui, id);
+            c.show_pick_placeholder(ui, id);
         });
         self.send(match request {
             Request::Pick => Command::Pick {
@@ -338,9 +220,9 @@ impl Controller {
         });
     }
 
-    fn show_placeholder(&mut self, ui: &AppWindow, id: u64) {
+    fn show_pick_placeholder(&mut self, ui: &AppWindow, id: u64) {
         if self.pick.pending.is_some_and(|(pending, _)| pending == id) {
-            self.release_card_images(ui);
+            self.release_card_images(ui, Surface::Pick);
             ui.global::<PickState>().set_status(PickStatus::Picking);
         }
     }
@@ -366,98 +248,35 @@ impl Controller {
         if !self.answer(id) {
             return;
         }
-        let has_poster = card.poster_path.is_some();
         self.pick.earlier = can_go_back;
-        self.pick.serial = self.pick.serial.wrapping_add(1);
-        self.pick.shown = Some(ShownCard { id, card, excluded });
-        self.pick.images = None;
-        self.pick.held_poster = None;
-        self.pick.held_backdrop = None;
-        if has_poster && Self::pick_visible(ui) && self.pick.card_box.is_some() {
-            // The old card stays until the poster is decoded (or POSTER_WAIT passes).
-            self.pick.awaiting_poster = true;
-            self.request_card_images(ui);
-            Self::later(&self.pick.poster_timer, &self.weak, POSTER_WAIT, move |c, ui| {
-                c.reveal(ui, id);
-            });
-        } else {
-            self.reveal(ui, id);
-        }
+        self.pick.excluded = excluded;
+        self.present_card(ui, Surface::Pick, id, card);
     }
 
-    /// Replaces the screen with the card that arrived, with whatever images are ready.
-    fn reveal(&mut self, ui: &AppWindow, id: u64) {
-        if !self.pick.shown.as_ref().is_some_and(|shown| shown.id == id) {
-            return;
-        }
-        let first_show = self.pick.awaiting_poster || self.pick.images.is_none();
-        self.pick.awaiting_poster = false;
-        self.pick.poster_timer.stop();
+    /// The new card is on screen: the page around it follows.
+    pub(super) fn pick_card_revealed(&mut self, ui: &AppWindow, with_poster: bool) {
         if self.pick.pending.is_none()
             && let Some(clicked) = self.pick.requested_at.take()
         {
-            let poster = if self.pick.held_poster.is_some() { "with" } else { "without" };
+            let poster = if with_poster { "with" } else { "without" };
             log_info!("card on screen {} ms after the click, {poster} its poster", clicked.elapsed().as_millis());
         }
-        let state = ui.global::<PickState>();
-        state.set_poster(self.pick.held_poster.take().unwrap_or_default());
-        state.set_backdrop(self.pick.held_backdrop.take().unwrap_or_default());
-        self.show_card(ui);
-        if first_show && let Some(shown) = &self.pick.shown {
-            let card = &shown.card;
+        self.show_pick_state(ui);
+        if let Some(card) = self.pick.card.card() {
             let year = if card.year.is_empty() { String::new() } else { format!(" ({})", card.year) };
-            state.set_announcement(format!("{}{year}. {}.", card.name, card.verdict).into());
+            let announcement = format!("{}{year}. {}.", card.name, card.verdict);
+            ui.global::<PickState>().set_announcement(announcement.into());
         }
-        self.request_logos(ui);
     }
 
-    /// Puts the card in `shown` on screen.
-    fn show_card(&mut self, ui: &AppWindow) {
-        let Some(shown) = &self.pick.shown else { return };
+    /// Status and buttons for the card on screen.
+    fn show_pick_state(&self, ui: &AppWindow) {
         let state = ui.global::<PickState>();
         state.set_busy(matches!(self.pick.pending, Some((_, Request::Pick))));
-        state.set_card(card_data(&shown.card));
-        state.set_card_serial(self.pick.serial);
-        state.set_excluded(exclusion(shown.excluded));
+        state.set_excluded(exclusion(self.pick.excluded));
         state.set_has_picked(true);
         state.set_can_go_back(self.pick.pending.is_none() && self.pick.earlier);
-        self.fill_groups(ui);
         state.set_status(PickStatus::Shown);
-        self.request_card_images(ui);
-    }
-
-    fn fill_groups(&mut self, ui: &AppWindow) {
-        let px = Self::logo_px(ui, CHIP_LOGO);
-        let Some(shown) = &self.pick.shown else { return };
-        let mut groups = Vec::new();
-        let mut models = Vec::new();
-        let mut logos = Vec::new();
-        for group in &shown.card.watch.groups {
-            let chips: Vec<WatchChip> = group
-                .chips
-                .iter()
-                .map(|chip| WatchChip {
-                    name: chip.name.as_str().into(),
-                    logo: chip
-                        .logo_path
-                        .as_deref()
-                        .and_then(|path| self.logos.get(&logo_key(path, px)))
-                        .cloned()
-                        .unwrap_or_default(),
-                })
-                .collect();
-            let model = Rc::new(VecModel::from(chips));
-            groups.push(WatchGroup {
-                label: group.kind.label().into(),
-                kind: group_kind(group.kind),
-                chips: ModelRc::from(model.clone()),
-            });
-            models.push(model);
-            logos.push(group.chips.iter().map(|c| c.logo_path.clone()).collect());
-        }
-        self.pick.chip_models = models;
-        self.pick.chip_logos = logos;
-        self.pick.groups.set_vec(groups);
     }
 
     pub(super) fn on_pick_failed(&mut self, ui: &AppWindow, id: u64, error: PickError) {
@@ -467,13 +286,13 @@ impl Controller {
         let narrow = filters::differs_from_default(&self.settings.filters);
         let (title, message, action) = describe(&error, narrow);
         self.pick.error_action = Some(action);
-        self.release_card_images(ui);
+        self.release_card_images(ui, Surface::Pick);
         let state = ui.global::<PickState>();
         state.set_busy(false);
         state.set_error_title(title.into());
         state.set_error_message(message.as_str().into());
         state.set_error_action(action_label(action).into());
-        state.set_can_go_back(self.pick.shown.is_some() || self.pick.earlier);
+        state.set_can_go_back(self.pick.card.card().is_some() || self.pick.earlier);
         state.set_status(PickStatus::Failed);
         state.set_announcement(format!("{title}. {message}").into());
     }
@@ -492,17 +311,20 @@ impl Controller {
     }
 
     pub(super) fn on_card_imdb(&mut self, ui: &AppWindow, id: u64, text: String, badge: ImdbBadge) {
-        let Some(shown) = self.pick.shown.as_mut().filter(|shown| shown.id == id) else {
+        if self.pick.card.id() != Some(id) {
             return;
-        };
-        shown.card.imdb = text;
-        shown.card.imdb_badge = badge;
-        ui.global::<PickState>().set_card(card_data(&shown.card));
+        }
+        let Some(card) = self.pick.card.card_mut() else { return };
+        card.imdb = text;
+        card.imdb_badge = badge;
+        let data = card_data(card);
+        let serial = ui.global::<PickState>().get_card_serial();
+        write_card(ui, Surface::Pick, data, serial);
     }
 
     pub fn exclude(&mut self, _ui: &AppWindow, which: Exclusion) {
-        let Some(shown) = &self.pick.shown else { return };
-        let title = shown.card.title;
+        let Some(card) = self.pick.card.card() else { return };
+        let title = card.title;
         let command = match which {
             Exclusion::Seen => Command::Exclude {
                 title,
@@ -518,169 +340,24 @@ impl Controller {
     }
 
     pub(super) fn on_excluded(&mut self, ui: &AppWindow, title: TitleRef, reason: Option<ExclusionReason>) {
-        if let Some(shown) = self.pick.shown.as_mut()
-            && shown.card.title == title
-        {
-            shown.excluded = reason;
+        if self.pick.card.card().is_some_and(|card| card.title == title) {
+            self.pick.excluded = reason;
             ui.global::<PickState>().set_excluded(exclusion(reason));
         }
     }
 
     pub fn open_where_to_watch(&mut self, _ui: &AppWindow) {
-        let link = self.pick.shown.as_ref().and_then(|s| s.card.watch.link.as_deref());
-        if let Some(link) = link
-            && !platform::shell::open_url(link)
-        {
-            log_warn!("refused to open a non-web link");
-        }
-    }
-
-    // ---- Card images -------------------------------------------------------------------
-
-    pub fn card_resized(&mut self, ui: &AppWindow, width: f32, height: f32, poster_width: f32, poster_height: f32) {
-        if width <= 0.0 || height <= 0.0 {
-            return;
-        }
-        let card_box = CardBox {
-            width,
-            height,
-            poster_width,
-            poster_height,
-        };
-        if self.pick.card_box == Some(card_box) {
-            return;
-        }
-        let first = self.pick.card_box.is_none();
-        self.pick.card_box = Some(card_box);
-        self.send_poster_width(ui);
-        if first {
-            self.request_card_images(ui);
-        } else {
-            // While the window is being resized the old images stretch; exact ones follow.
-            Self::later(&self.pick.resize_timer, &self.weak, RESIZE_SETTLE, |c, ui| {
-                c.request_card_images(ui);
-            });
-        }
+        self.open_card_link(Surface::Pick);
     }
 
     /// Tells the worker the poster's physical width, so prepared picks download that size,
     /// including the first one, which is prepared before any card asks for images.
     pub(super) fn send_poster_width(&mut self, ui: &AppWindow) {
-        let Some(card_box) = self.pick.card_box else { return };
+        let Some(card_box) = self.pick.card.card_box else { return };
         let width = (card_box.poster_width * ui.window().scale_factor()).round().max(1.0) as u32;
         if self.pick.poster_width_sent != Some(width) {
             self.pick.poster_width_sent = Some(width);
             self.send(Command::PosterWidth(width));
-        }
-    }
-
-    /// Asks for the poster and backdrop at the exact physical size the card shows them.
-    pub(super) fn request_card_images(&mut self, ui: &AppWindow) {
-        let showing = ui.global::<PickState>().get_status() == PickStatus::Shown;
-        if !Self::pick_visible(ui) || !(showing || self.pick.awaiting_poster) {
-            return;
-        }
-        let (Some(shown), Some(card_box)) = (&self.pick.shown, self.pick.card_box) else {
-            return;
-        };
-        let scale = ui.window().scale_factor();
-        let px = |logical: f32| (logical * scale).round().max(1.0) as u32;
-        let wanted = ImagesRequested {
-            id: shown.id,
-            poster: (px(card_box.poster_width), px(card_box.poster_height)),
-            backdrop: (px(card_box.width), px(card_box.height)),
-        };
-        if self.pick.images == Some(wanted) {
-            return;
-        }
-        let poster_radius = ui.global::<CardMetrics>().get_poster_radius() * scale;
-        let card_radius = ui.global::<Theme>().get_radius_card() * scale;
-        let command = Command::LoadCardImages {
-            id: shown.id,
-            poster: shown.card.poster_path.clone().map(|path| ImageSpec {
-                path,
-                width: wanted.poster.0,
-                height: wanted.poster.1,
-                radius: poster_radius,
-            }),
-            backdrop: shown.card.backdrop_path.clone().map(|path| ImageSpec {
-                path,
-                width: wanted.backdrop.0,
-                height: wanted.backdrop.1,
-                radius: card_radius,
-            }),
-        };
-        self.pick.images = Some(wanted);
-        self.send(command);
-    }
-
-    pub(super) fn on_card_image(
-        &mut self,
-        ui: &AppWindow,
-        id: u64,
-        kind: CardImageKind,
-        pixels: SharedPixelBuffer<Rgba8Pixel>,
-    ) {
-        let current = self.pick.images.is_some_and(|images| images.id == id);
-        if !current || !Self::pick_visible(ui) {
-            return; // replaced, or released while another screen shows
-        }
-        let image = slint::Image::from_rgba8(pixels);
-        if self.pick.awaiting_poster {
-            match kind {
-                CardImageKind::Poster => {
-                    self.pick.held_poster = Some(image);
-                    self.reveal(ui, id);
-                }
-                CardImageKind::Backdrop => self.pick.held_backdrop = Some(image),
-            }
-            return;
-        }
-        let state = ui.global::<PickState>();
-        match kind {
-            CardImageKind::Poster => state.set_poster(image),
-            CardImageKind::Backdrop => state.set_backdrop(image),
-        }
-    }
-
-    /// Frees the decoded poster and backdrop (another screen shows, or the card changes).
-    pub(super) fn release_card_images(&mut self, ui: &AppWindow) {
-        if self.pick.awaiting_poster {
-            // The waiting card shows now, without images; they're requested again later.
-            if let Some(id) = self.pick.shown.as_ref().map(|shown| shown.id) {
-                self.pick.held_poster = None;
-                self.pick.held_backdrop = None;
-                self.reveal(ui, id);
-            }
-        }
-        let state = ui.global::<PickState>();
-        state.set_poster(slint::Image::default());
-        state.set_backdrop(slint::Image::default());
-        self.pick.images = None;
-    }
-
-    /// The Pick page came back into view, or the scale or network changed.
-    pub(super) fn reload_card_images(&mut self, ui: &AppWindow) {
-        let state = ui.global::<PickState>();
-        let missing = state.get_poster().size().width == 0 || state.get_backdrop().size().width == 0;
-        if missing {
-            self.pick.images = None;
-        }
-        self.request_card_images(ui);
-    }
-
-    /// Puts a decoded logo into every chip that shows it.
-    pub(super) fn place_chip_logo(&self, path: &str, image: &slint::Image) {
-        for (group, logos) in self.pick.chip_logos.iter().enumerate() {
-            let Some(model) = self.pick.chip_models.get(group) else { continue };
-            for (row, logo) in logos.iter().enumerate() {
-                if logo.as_deref() == Some(path)
-                    && let Some(mut chip) = model.row_data(row)
-                {
-                    chip.logo = image.clone();
-                    model.set_row_data(row, chip);
-                }
-            }
         }
     }
 

@@ -1,8 +1,10 @@
 //! Messages between the UI thread and the worker thread.
 
 use randomovie::card::{ImdbBadge, TitleCard};
+use randomovie::error::ApiError;
 use randomovie::media::{MediaChoice, TitleRef};
 use randomovie::picker::PickError;
+use randomovie::search::{HitInfo, SearchHit};
 use randomovie::services::ServiceCatalog;
 use randomovie::store::{ExclusionReason, Settings};
 use randomovie::tmdb::model::Region;
@@ -47,11 +49,21 @@ pub enum Command {
         poster: Option<ImageSpec>,
         backdrop: Option<ImageSpec>,
     },
+    /// One page of results for `query`. Every page of one query shares its `id`; a new id
+    /// makes older searches stop.
+    Search { id: u64, query: String, page: u32 },
+    /// Rating and availability again for rows already shown (services, region or IMDb
+    /// ratings changed).
+    SearchInfo { id: u64, titles: Vec<TitleRef> },
+    /// Result thumbnails at exact physical sizes.
+    LoadThumbs(Vec<ImageSpec>),
+    /// The title card for a search result.
+    OpenTitle { id: u64, title: TitleRef },
     Shutdown,
 }
 
 /// An image path and the exact physical pixels it will be drawn at.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct ImageSpec {
     pub path: String,
     pub width: u32,
@@ -145,5 +157,37 @@ pub enum Update {
     Excluded {
         title: TitleRef,
         reason: Option<ExclusionReason>,
+    },
+    /// A page of search results; rating and availability follow per row.
+    SearchResults {
+        id: u64,
+        page: u32,
+        total_pages: u32,
+        hits: Vec<SearchHit>,
+    },
+    SearchFailed {
+        id: u64,
+        page: u32,
+        error: ApiError,
+    },
+    /// A row's rating and availability; `None` when its details couldn't be loaded.
+    SearchHitInfo {
+        id: u64,
+        title: TitleRef,
+        info: Option<HitInfo>,
+    },
+    Thumb {
+        spec: ImageSpec,
+        pixels: SharedPixelBuffer<Rgba8Pixel>,
+    },
+    ThumbFailed(ImageSpec),
+    /// The card for an opened search result.
+    TitleCard {
+        id: u64,
+        card: Box<TitleCard>,
+    },
+    TitleCardFailed {
+        id: u64,
+        error: ApiError,
     },
 }

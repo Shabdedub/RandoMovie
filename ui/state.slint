@@ -179,6 +179,61 @@ export global PickState {
     callback card-resized(length, length, length, length);
 }
 
+// ---- Search ------------------------------------------------------------------------------
+
+export enum SearchStatus { idle, searching, results, empty, failed }
+
+// One search result. `imdb-state`: 0 rated, 1 unavailable, 2 loading.
+// `verdict-state`: 0 on your services, 1 free, 2 not on your services, 3 not streaming in the
+// region, 4 loading, 5 couldn't load.
+export struct SearchRow {
+    name: string,
+    meta: string,
+    thumb: image,
+    imdb: string,
+    imdb-state: int,
+    verdict: string,
+    verdict-state: int,
+}
+
+export global SearchState {
+    in-out property <string> text;
+    in property <SearchStatus> status: SearchStatus.idle;
+    in property <[SearchRow]> rows;
+    in-out property <int> selected: -1;
+    in property <string> heading;
+    in property <string> intro;
+    in property <string> message;
+    // A newer search is running while the previous results still show.
+    in property <bool> searching;
+    in property <bool> has-more;
+    in property <bool> loading-more;
+    // Bumped by Ctrl+F to put the cursor in the search box.
+    in-out property <int> focus-request;
+    // Bumped for each new query's results, to scroll the list back to the top.
+    in-out property <int> results-serial;
+
+    // The opened result, shown over the list, which keeps its place.
+    in property <bool> card-open;
+    in property <bool> card-loading;
+    in property <string> card-error;
+    in property <TitleCardData> card;
+    in property <int> card-serial;
+    in property <[WatchGroup]> groups;
+    in property <image> poster;
+    in property <image> backdrop;
+    in property <string> announcement;
+
+    callback edited(string);
+    callback submitted();
+    callback open(int);
+    callback close-card();
+    callback load-more();
+    callback retry();
+    callback open-where-to-watch();
+    callback card-resized(length, length, length, length);
+}
+
 export global SettingsState {
     in property <[string]> region-names;
     in-out property <int> region-index;

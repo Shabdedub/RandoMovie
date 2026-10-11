@@ -1,0 +1,436 @@
+// The Library: titles marked "Seen it" (Watched) or "Not interested" on the Pick screen, one
+// tab each. Up and Down move through a tab's titles, Enter opens one, and Delete takes it off
+// the list so it can be picked again.
+
+import { ScrollView } from "std-widgets.slint";
+import { Theme, Icons } from "../theme.slint";
+import { AppButton, ButtonKind, FontIcon, Notice, Segmented, Skeleton, TextButton } from "../widgets.slint";
+import { CardMetrics, TitleCardSkeleton, TitleCardView } from "../card.slint";
+import { SearchMetrics } from "search.slint";
+import { LibraryRow, LibraryState } from "../state.slint";
+
+component LibraryItemView inherits Rectangle {
+    in property <LibraryRow> item;
+    in property <bool> selected;
+    // The list has keyboard focus, so the selected row shows the focus ring.
+    in property <bool> list-focused;
+    // "Watched" or "Not interested", for the Remove button's name.
+    in property <string> list-name;
+    callback activate();
+    callback remove();
+
+    height: SearchMetrics.row-height;
+    border-radius: Theme.radius-card;
+    background: touch.pressed ? Theme.pressed
+        : touch.has-hover ? Theme.hover
+        : root.selected ? Theme.raised
+        : transparent;
+    border-width: root.selected && root.list-focused ? 2px : root.selected ? 1px : 0px;
+    border-color: root.list-focused ? Theme.accent : Theme.border;
+
+    accessible-role: list-item;
+    accessible-label: root.item.pending ? "Loading a title's details"
+        : root.item.name + ", " + root.item.meta
+        + (root.item.imdb == "" ? "" : ", " + root.item.imdb)
+        + ", " + root.item.marked;
+    accessible-description: "Enter opens it. Delete removes it from " + root.list-name + ".";
+    accessible-item-selectable: true;
+    accessible-item-selected: root.selected;
+    accessible-action-default => {
+        root.activate();
+    }
+
+    touch := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => {
+            root.activate();
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 16px;
+        spacing: 14px;
+        cross-axis-alignment: center;
+
+        Rectangle {
+            width: SearchMetrics.thumb-width;
+            height: SearchMetrics.thumb-height;
+            border-radius: SearchMetrics.thumb-radius;
+            background: Theme.hover;
+            if root.item.thumb.width == 0 && !root.item.pending: FontIcon {
+                glyph: Icons.movies;
+                font-size: 18px;
+                color: Theme.text-disabled;
+            }
+            Image {
+                source: root.item.thumb;
+                width: parent.width;
+                height: parent.height;
+                accessible-role: none;
+            }
+        }
+
+        if root.item.pending: VerticalLayout {
+            alignment: center;
+            cross-axis-alignment: start;
+            spacing: 8px;
+            horizontal-stretch: 1;
+            Skeleton {
+                width: 240px;
+                height: 16px;
+            }
+            Skeleton {
+                width: 160px;
+                height: 13px;
+            }
+        }
+
+        if !root.item.pending: VerticalLayout {
+            alignment: center;
+            spacing: 5px;
+            horizontal-stretch: 1;
+            Text {
+                text: root.item.name;
+                font-size: 15px;
+                font-weight: 600;
+                color: Theme.text;
+                overflow: elide;
+                accessible-role: none;
+            }
+            HorizontalLayout {
+                spacing: 14px;
+                Text {
+                    text: root.item.meta;
+                    color: Theme.text-muted;
+                    horizontal-stretch: 0;
+                    accessible-role: none;
+                }
+                if root.item.imdb != "": HorizontalLayout {
+                    spacing: 5px;
+                    horizontal-stretch: 0;
+                    FontIcon {
+                        glyph: Icons.star;
+                        font-size: 13px;
+                        color: Theme.star;
+                    }
+                    Text {
+                        text: root.item.imdb;
+                        color: Theme.text;
+                        vertical-alignment: center;
+                        accessible-role: none;
+                    }
+                }
+                Rectangle {
+                    horizontal-stretch: 1;
+                }
+            }
+            Text {
+                text: root.item.marked;
+                color: Theme.text-muted;
+                font-size: Theme.caption;
+                overflow: elide;
+                accessible-role: none;
+            }
+        }
+
+        // With the keyboard, Delete does the same; the button isn't a Tab stop on every row.
+        TextButton {
+            text: "Remove";
+            accessible-text: "Remove " + (root.item.pending ? "this title" : root.item.name) + " from " + root.list-name;
+            tab-stop: false;
+            clicked => {
+                root.remove();
+            }
+        }
+    }
+}
+
+export component LibraryPage inherits Rectangle {
+    // An opened card takes the focus, so Esc closes it.
+    property <bool> card-open: LibraryState.card-open;
+    changed card-open => {
+        if (self.card-open) {
+            card-scope.focus();
+        }
+    }
+    property <int> list-serial: LibraryState.list-serial;
+    changed list-serial => {
+        list.content-y = 0;
+    }
+    property <string> list-name: LibraryState.tab == 0 ? "Watched" : "Not interested";
+    property <string> other-name: LibraryState.tab == 0 ? "Not interested" : "Watched";
+
+    function close-card() {
+        LibraryState.close-card();
+        list-scope.focus();
+    }
+
+    function report-size() {
+        let poster-height = CardMetrics.poster-height(card-slot.width, card-slot.height);
+        LibraryState.card-resized(card-slot.width, card-slot.height, poster-height * 2 / 3, poster-height);
+    }
+
+    // Selects a title and scrolls it into view.
+    function select(index: int) {
+        if (LibraryState.rows.length == 0) {
+            return;
+        }
+        let i = max(0, min(index, LibraryState.rows.length - 1));
+        LibraryState.selected = i;
+        let step = SearchMetrics.row-height + SearchMetrics.row-gap;
+        let top = i * step;
+        let bottom = top + SearchMetrics.row-height;
+        if (top < -list.content-y) {
+            list.content-y = -top;
+        } else if (bottom > -list.content-y + list.visible-height) {
+            list.content-y = -(bottom - list.visible-height);
+        }
+    }
+
+    // The list takes the focus without selecting a title, so nothing looks focused until a
+    // key moves the selection.
+    init => {
+        if (!LibraryState.card-open) {
+            list-scope.focus();
+        }
+        root.report-size();
+    }
+
+    VerticalLayout {
+        padding: 32px;
+        padding-bottom: 24px;
+        spacing: 16px;
+
+        HorizontalLayout {
+            spacing: 16px;
+            Text {
+                text: "Library";
+                font-size: Theme.title;
+                font-weight: 600;
+                color: Theme.text;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            Segmented {
+                label: "Library list";
+                options: LibraryState.tabs;
+                selected <=> LibraryState.tab;
+                changed(index) => {
+                    LibraryState.tab-selected(index);
+                }
+            }
+        }
+
+        if !LibraryState.card-open: Text {
+            text: "Titles you marked on the Pick screen. They're never picked again unless you remove them here.";
+            color: Theme.text-muted;
+            wrap: word-wrap;
+        }
+
+        if LibraryState.notice != "" && !LibraryState.card-open: HorizontalLayout {
+            spacing: 10px;
+            height: 24px;
+            FontIcon {
+                glyph: Icons.check;
+                font-size: 14px;
+                color: Theme.success;
+            }
+            Text {
+                text: LibraryState.notice;
+                color: Theme.text;
+                vertical-alignment: center;
+                overflow: elide;
+                horizontal-stretch: 0;
+            }
+            if LibraryState.can-undo: TextButton {
+                text: "Undo";
+                icon: Icons.undo;
+                clicked => {
+                    LibraryState.undo();
+                }
+            }
+            Rectangle {
+                horizontal-stretch: 1;
+            }
+        }
+
+        stage := Rectangle {
+            vertical-stretch: 1;
+            min-height: 200px;
+
+            list-scope := FocusScope {
+                x: 0;
+                y: 0;
+                width: parent.width;
+                height: parent.height;
+                visible: !LibraryState.card-open;
+                key-pressed(event) => {
+                    if (event.text == Key.DownArrow) {
+                        root.select(LibraryState.selected + 1);
+                        return accept;
+                    }
+                    if (event.text == Key.UpArrow) {
+                        root.select(LibraryState.selected - 1);
+                        return accept;
+                    }
+                    if (event.text == Key.Home) {
+                        root.select(0);
+                        return accept;
+                    }
+                    if (event.text == Key.End) {
+                        root.select(LibraryState.rows.length - 1);
+                        return accept;
+                    }
+                    if (event.text == Key.PageDown || event.text == Key.PageUp) {
+                        let page = max(1, floor(list.visible-height / (SearchMetrics.row-height + SearchMetrics.row-gap)));
+                        root.select(LibraryState.selected + (event.text == Key.PageDown ? page : -page));
+                        return accept;
+                    }
+                    if ((event.text == Key.Return || event.text == Key.Space) && LibraryState.selected >= 0) {
+                        LibraryState.open(LibraryState.selected);
+                        return accept;
+                    }
+                    if ((event.text == Key.Delete || event.text == Key.Backspace) && LibraryState.selected >= 0) {
+                        LibraryState.remove(LibraryState.selected);
+                        return accept;
+                    }
+                    reject
+                }
+
+                list := ScrollView {
+                    visible: LibraryState.rows.length > 0;
+                    accessible-role: AccessibleRole.list;
+                    accessible-label: root.list-name;
+                    VerticalLayout {
+                        alignment: start;
+                        spacing: SearchMetrics.row-gap;
+                        padding-right: 12px;
+                        for row[index] in LibraryState.rows: LibraryItemView {
+                            item: row;
+                            selected: index == LibraryState.selected;
+                            list-focused: list-scope.has-focus;
+                            list-name: root.list-name;
+                            activate => {
+                                LibraryState.selected = index;
+                                LibraryState.open(index);
+                            }
+                            remove => {
+                                LibraryState.remove(index);
+                            }
+                        }
+                    }
+                }
+
+                if LibraryState.rows.length == 0 && !LibraryState.loading && LibraryState.tab == 0: Notice {
+                    icon: Icons.seen;
+                    title: "Nothing marked as seen yet";
+                    body: "When a pick is something you've already watched, choose Seen it. It's listed here and never picked again.";
+                }
+                if LibraryState.rows.length == 0 && !LibraryState.loading && LibraryState.tab == 1: Notice {
+                    icon: Icons.blocked;
+                    title: "Nothing marked as not interested";
+                    body: "When a pick isn't for you, choose Not interested. It's listed here and never picked again.";
+                }
+            }
+
+            // The opened title. It's always laid out, so its size is known before it opens.
+            card-scope := FocusScope {
+                x: 0;
+                y: 0;
+                width: parent.width;
+                height: parent.height;
+                visible: LibraryState.card-open;
+                enabled: LibraryState.card-open;
+                key-pressed(event) => {
+                    if (event.text == Key.Escape) {
+                        root.close-card();
+                        return accept;
+                    }
+                    reject
+                }
+                VerticalLayout {
+                    spacing: 12px;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        AppButton {
+                            text: "Back to library";
+                            icon: Icons.back;
+                            kind: ButtonKind.subtle;
+                            clicked => {
+                                root.close-card();
+                            }
+                        }
+                        Rectangle {
+                            horizontal-stretch: 1;
+                        }
+                        AppButton {
+                            text: "Move to " + root.other-name;
+                            accessible-text: "Move to " + root.other-name + ": it stays out of picks";
+                            clicked => {
+                                LibraryState.move-open();
+                            }
+                        }
+                        AppButton {
+                            text: "Remove from " + root.list-name;
+                            icon: Icons.delete;
+                            accessible-text: "Remove from " + root.list-name + ": it can be picked again";
+                            clicked => {
+                                LibraryState.remove-open();
+                            }
+                        }
+                    }
+                    card-slot := Rectangle {
+                        vertical-stretch: 1;
+                        changed width => {
+                            root.report-size();
+                        }
+                        changed height => {
+                            root.report-size();
+                        }
+                        if LibraryState.card-open && LibraryState.card-loading: TitleCardSkeleton { }
+                        if LibraryState.card-open && !LibraryState.card-loading && LibraryState.card-error != "": Rectangle {
+                            border-radius: Theme.radius-card;
+                            background: Theme.surface;
+                            border-width: 1px;
+                            border-color: Theme.border;
+                            Notice {
+                                icon: Icons.info;
+                                problem: true;
+                                title: "This title didn't load";
+                                body: LibraryState.card-error;
+                                action: "Try again";
+                                act => {
+                                    LibraryState.open(LibraryState.selected);
+                                }
+                            }
+                        }
+                        if LibraryState.card-open && !LibraryState.card-loading && LibraryState.card-error == "": TitleCardView {
+                            data: LibraryState.card;
+                            groups: LibraryState.groups;
+                            poster: LibraryState.poster;
+                            backdrop: LibraryState.backdrop;
+                            serial: LibraryState.card-serial;
+                            open-link => {
+                                LibraryState.open-where-to-watch();
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Screen readers hear about removals, moves and opened titles.
+            Text {
+                x: 0;
+                y: 0;
+                width: 1px;
+                height: 1px;
+                text: LibraryState.announcement;
+                color: transparent;
+                accessible-role: AccessibleRole.text;
+                accessible-label: LibraryState.announcement;
+                accessible-live-region: AccessibleLiveness.polite;
+            }
+        }
+    }
+}

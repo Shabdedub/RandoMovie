@@ -6,15 +6,31 @@ use binary units, as Windows Explorer shows them: 1 MB is 1,048,576 bytes.
 
 ## Budgets from the spec
 
-All budgets are met by the final build (0.5.0, phase 5).
+All budgets were met by phase 5's final build (0.5.0) and still are with the Library (0.6.0).
 
-| Budget | Target | Final result |
+| Budget | Target | Result |
 |---|---|---|
-| Idle CPU | 0 % | 0 ms of CPU in 60 s, across all threads, with a pick on screen and with search results on screen |
+| Idle CPU | 0 % | 0 ms of CPU in 60 s, across all threads, with a pick on screen and with search results on screen; 0 ms in 30 s with the Library on screen (0.6.0) |
 | Private working set after about 20 titles | under 50 MB | 22.3 MB private bytes after 30 picks; 22.7 MB after a series of searches and opened titles more |
 | Window interactive after launch | within 0.5 s | Visible 43 to 51 ms after launch; first frame 59 to 63 ms after `main` starts |
-| `RandoMovie.exe` size | under 15 MB | 13.17 MB (13,811,712 bytes) |
+| `RandoMovie.exe` size | under 15 MB | 13.63 MB (14,295,040 bytes) with the Library; 13.17 MB in 0.5.0 |
 | IMDb rebuild peak memory | "modest" | About 2 MB extra (phase 1) |
+
+## After phase 5: the Library (0.6.0)
+
+Measured on 2026-10-11 with the 0.6.0 release build, on a test profile with titles in both
+lists.
+
+| Measurement | Result |
+|---|---|
+| `RandoMovie.exe` | 13.63 MB (14,295,040 bytes), 472 KB more than 0.5.0 |
+| Idle 30 s with the Library on screen, all threads | 0 ms of CPU |
+| Private bytes with the Library on screen | 14.9 MB at the test window's size, 13.3 MB at the minimum size |
+
+The Library adds no network work: the list is one SQLite query, ratings come from the local
+IMDb index, and marking a title saves its details from the response already cached for the
+card. Most of the 472 KB is the code Slint generates for the page and its row, much as
+Search's page added 0.47 MB in phase 4; the exe stays 1.37 MB under budget.
 
 ## Phase 5: final measurements
 

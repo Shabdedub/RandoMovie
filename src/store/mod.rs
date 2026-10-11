@@ -8,5 +8,5 @@ pub mod settings;
 
 pub use cache::CachedBody;
 pub use db::Store;
-pub use history::ExclusionReason;
+pub use history::{ExclusionReason, MarkedTitle, TitleSummary};
 pub use settings::{Filters, Settings, Theme, WindowGeometry};

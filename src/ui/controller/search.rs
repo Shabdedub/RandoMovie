@@ -73,7 +73,7 @@ impl SearchView {
     }
 }
 
-fn thumb_key(spec: &ImageSpec) -> String {
+pub(super) fn thumb_key(spec: &ImageSpec) -> String {
     format!("{}x{}:{}", spec.width, spec.height, spec.path)
 }
 
@@ -111,7 +111,7 @@ fn apply_info(row: &mut SearchRow, info: Option<&HitInfo>) {
     }
 }
 
-fn error_message(error: &ApiError) -> String {
+pub(super) fn error_message(error: &ApiError) -> String {
     match error {
         ApiError::Unauthorized => {
             "TMDB didn't accept the token. Add a new one in Settings, then try again.".to_owned()
@@ -365,7 +365,8 @@ impl Controller {
 
     // ---- Thumbnails --------------------------------------------------------------------
 
-    fn thumb_spec(ui: &AppWindow, path: &str) -> ImageSpec {
+    /// A result or Library thumbnail at the exact physical pixels it's drawn at.
+    pub(super) fn thumb_spec(ui: &AppWindow, path: &str) -> ImageSpec {
         let metrics = ui.global::<SearchMetrics>();
         let scale = ui.window().scale_factor();
         let px = |logical: f32| (logical * scale).round().max(1.0) as u32;

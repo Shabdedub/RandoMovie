@@ -33,9 +33,11 @@ src/
   ui/controller/card.rs         a page's title card: images at exact size, poster wait, chips (binary)
   ui/controller/pick.rs         Pick screen: requests, history buttons, exclusions, filter bar (binary)
   ui/controller/search.rs       Search screen: debounce, pages, row info, thumbnails, opened title (binary)
+  ui/controller/library.rs      Library: the two lists, opened title, remove, move and Undo (binary)
   worker/mod.rs                 worker thread, current-thread Tokio runtime, command handlers (binary)
   worker/pick.rs                pick requests, the prepared next pick, session history, exclusions (binary)
   worker/search.rs              result pages, each row's rating and availability, thumbnails (binary)
+  worker/library.rs             marked titles, their saved details, Undo of a removal (binary)
   worker/messages.rs            Command (UI to worker) and Update (worker to UI)            (binary)
   worker/images.rs              decode, scale to exact pixels, round corners, blur backdrops (binary)
   card.rs                       the title card's display text and where-to-watch groups
@@ -66,7 +68,7 @@ src/
   store/
     db.rs                       SQLite connection (WAL, 1 MB page cache) and schema
     cache.rs                    HTTP response cache with TTLs, image cache with 30-day TTL and 150 MB LRU cap
-    history.rs                  pick history and "Seen it" / "Not interested" exclusions
+    history.rs                  pick history, "Seen it" / "Not interested" marks and their details
     settings.rs                 settings.json load/save, versioned migration, sanitising
   platform/                     Windows APIs (windows crate)
     region.rs                   country: GetUserDefaultGeoName, then the regional format, then AU
@@ -328,6 +330,31 @@ no `tempfile` (tests use unique folders under the system temp dir).
   above, which took the exe from 16.85 MB to 13.17 MB. PERFORMANCE.md has the sections before
   and after.
 
+## Library (after phase 5, version 0.6.0)
+
+- **Where it comes from.** The marks the Pick screen already stored for exclusions, so nothing
+  is tracked twice. The table gained the title's name, year, poster path and IMDb id (schema
+  version 2). Marking a title saves them from the details the card was built from, which are
+  in the cache, so it costs no request. Columns are added when missing rather than by
+  `user_version`, which an older build resets when it opens the database.
+- **Data flow.** Opening the page sends `LoadLibrary`. The worker answers at once from one
+  SQLite query, with IMDb ratings from the local index, then fills in titles marked before
+  the Library existed: their details four at a time, saved, and sent row by row. Answers carry
+  the load's id, like searches, so a reload drops an older one.
+- **One more card surface.** The title card's `CardSlot` gained a third surface, so a Library
+  title opens over the list exactly as a search result does, with images at exact size and the
+  same placeholders. Thumbnails reuse Search's size, so a poster both pages show decodes to the
+  same image.
+- **Changes go through the existing commands.** Remove is `Unexclude`, Move is `Exclude` with
+  the other reason, and Undo is a new `Restore`, which writes the title back with its first
+  date and details. A removal or move updates the rows in place, keeping the selection where it
+  was; anything else (an Undo, a change made on Pick) reads the list again.
+- **Keyboard and screen readers.** The list takes the focus when the page opens but selects
+  nothing, so no ring shows until a key is pressed. Up, Down, Home, End and the page keys move,
+  Enter opens, Delete removes. Each row's Remove button is reachable by mouse and screen reader
+  but isn't a Tab stop, so Tab doesn't walk through every row. Removals, moves, tab changes and
+  opened titles are announced.
+
 ## Testing
 
 - Unit tests on the recorded fixtures cover: the eligibility rule and chip grouping, variant
@@ -336,7 +363,9 @@ no `tempfile` (tests use unique folders under the system temp dir).
   cache expiry and image LRU eviction, settings migration, genre mapping, and the pick loop
   against a fake catalog with a seeded RNG. Phase 5 added the theme's WCAG contrast against
   `ui/theme.slint`, settings with a byte-order mark, and hand-edited filter values snapping to
-  the filter bar's steps.
+  the filter bar's steps. The Library added the marked-title list and its saved details, the
+  upgrade of a version 1 database (also after an older build reset its version), and the
+  "Marked 3 days ago" wording.
 - `tests/live.rs` holds `#[ignore]`d live tests using `TMDB_TOKEN` from `.env`, including the
   acceptance checks for single-service picks, free-only picks and search speed.
 - Every phase ends with a release build, `cargo clippy --all-targets -- -D warnings`, `cargo test`,

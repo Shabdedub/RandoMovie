@@ -18,8 +18,8 @@ use slint::winit_030::winit;
 
 use crate::worker::{self, Command, Sink};
 use crate::{
-    AppState, AppWindow, Exclusion, OnboardingState, Page, PickState, SearchState, ServicesState,
-    SettingsState, Theme, TokenForm,
+    AppState, AppWindow, Exclusion, LibraryState, OnboardingState, Page, PickState, SearchState,
+    ServicesState, SettingsState, Theme, TokenForm,
 };
 use controller::Controller;
 
@@ -380,6 +380,19 @@ fn wire_callbacks(ui: &AppWindow, controller: &Rc<RefCell<Controller>>) {
     search.on_open_where_to_watch(handler!(controller, weak, |c, ui| c.search_open_link(&ui)));
     search.on_card_resized(handler!(controller, weak, |c, ui, width: f32, height: f32, poster_width: f32, poster_height: f32| c
         .search_card_resized(&ui, width, height, poster_width, poster_height)));
+
+    let library = ui.global::<LibraryState>();
+    library.on_tab_selected(handler!(controller, weak, |c, ui, index: i32| c
+        .library_tab_selected(&ui, index)));
+    library.on_open(handler!(controller, weak, |c, ui, index: i32| c.library_open(&ui, index)));
+    library.on_remove(handler!(controller, weak, |c, ui, index: i32| c.library_remove(&ui, index)));
+    library.on_remove_open(handler!(controller, weak, |c, ui| c.library_remove_open(&ui)));
+    library.on_move_open(handler!(controller, weak, |c, ui| c.library_move_open(&ui)));
+    library.on_undo(handler!(controller, weak, |c, ui| c.library_undo(&ui)));
+    library.on_close_card(handler!(controller, weak, |c, ui| c.library_close_card(&ui)));
+    library.on_open_where_to_watch(handler!(controller, weak, |c, ui| c.library_open_link(&ui)));
+    library.on_card_resized(handler!(controller, weak, |c, ui, width: f32, height: f32, poster_width: f32, poster_height: f32| c
+        .library_card_resized(&ui, width, height, poster_width, poster_height)));
 
     let settings = ui.global::<SettingsState>();
     settings.on_region_selected(handler!(controller, weak, |c, ui, index: i32| c

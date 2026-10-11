@@ -1,5 +1,6 @@
-//! A title card on one page, with its images and logo chips. Pick and Search each have one;
-//! they differ only in which Slint global shows them and what the page does around them.
+//! A title card on one page, with its images and logo chips. Pick, Search and the Library each
+//! have one; they differ only in which Slint global shows them and what the page does around
+//! them.
 
 use std::rc::Rc;
 use std::time::Duration;
@@ -13,7 +14,7 @@ use slint::{ComponentHandle, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffe
 use super::{Controller, logo_key};
 use crate::worker::{CardImageKind, Command, ImageSpec};
 use crate::{
-    AppState, AppWindow, CardMetrics, Page, PickState, PickStatus, SearchState, Theme,
+    AppState, AppWindow, CardMetrics, LibraryState, Page, PickState, PickStatus, SearchState, Theme,
     TitleCardData, WatchChip, WatchGroup,
 };
 
@@ -30,6 +31,19 @@ const RESIZE_SETTLE: Duration = Duration::from_millis(150);
 pub(super) enum Surface {
     Pick,
     Search,
+    Library,
+}
+
+impl Surface {
+    pub(super) const ALL: [Surface; 3] = [Surface::Pick, Surface::Search, Surface::Library];
+
+    pub(super) fn page(self) -> Page {
+        match self {
+            Surface::Pick => Page::Pick,
+            Surface::Search => Page::Search,
+            Surface::Library => Page::Library,
+        }
+    }
 }
 
 /// The card's size and its poster's, in logical pixels.
@@ -147,12 +161,13 @@ pub(super) fn imdb_state(badge: ImdbBadge) -> i32 {
     }
 }
 
-// ---- The two Slint globals ---------------------------------------------------------------
+// ---- The three Slint globals -------------------------------------------------------------
 
 fn set_poster(ui: &AppWindow, surface: Surface, image: Image) {
     match surface {
         Surface::Pick => ui.global::<PickState>().set_poster(image),
         Surface::Search => ui.global::<SearchState>().set_poster(image),
+        Surface::Library => ui.global::<LibraryState>().set_poster(image),
     }
 }
 
@@ -160,6 +175,7 @@ fn set_backdrop(ui: &AppWindow, surface: Surface, image: Image) {
     match surface {
         Surface::Pick => ui.global::<PickState>().set_backdrop(image),
         Surface::Search => ui.global::<SearchState>().set_backdrop(image),
+        Surface::Library => ui.global::<LibraryState>().set_backdrop(image),
     }
 }
 
@@ -171,6 +187,10 @@ fn images_missing(ui: &AppWindow, surface: Surface) -> bool {
         }
         Surface::Search => {
             let state = ui.global::<SearchState>();
+            (state.get_poster(), state.get_backdrop())
+        }
+        Surface::Library => {
+            let state = ui.global::<LibraryState>();
             (state.get_poster(), state.get_backdrop())
         }
     };
@@ -189,6 +209,11 @@ pub(super) fn write_card(ui: &AppWindow, surface: Surface, data: TitleCardData, 
             state.set_card(data);
             state.set_card_serial(serial);
         }
+        Surface::Library => {
+            let state = ui.global::<LibraryState>();
+            state.set_card(data);
+            state.set_card_serial(serial);
+        }
     }
 }
 
@@ -197,6 +222,7 @@ impl Controller {
         match surface {
             Surface::Pick => &self.pick.card,
             Surface::Search => &self.search.card,
+            Surface::Library => &self.library.card,
         }
     }
 
@@ -204,26 +230,26 @@ impl Controller {
         match surface {
             Surface::Pick => &mut self.pick.card,
             Surface::Search => &mut self.search.card,
+            Surface::Library => &mut self.library.card,
         }
     }
 
     /// The page with this card is on screen.
     pub(super) fn surface_visible(ui: &AppWindow, surface: Surface) -> bool {
         let app = ui.global::<AppState>();
-        !app.get_onboarding()
-            && app.get_page()
-                == match surface {
-                    Surface::Pick => Page::Pick,
-                    Surface::Search => Page::Search,
-                }
+        !app.get_onboarding() && app.get_page() == surface.page()
     }
 
-    /// The page shows the card itself, rather than placeholders, an error or the results.
+    /// The page shows the card itself, rather than placeholders, an error or a list.
     fn card_showing(ui: &AppWindow, surface: Surface) -> bool {
         match surface {
             Surface::Pick => ui.global::<PickState>().get_status() == PickStatus::Shown,
             Surface::Search => {
                 let state = ui.global::<SearchState>();
+                state.get_card_open() && !state.get_card_loading() && state.get_card_error().is_empty()
+            }
+            Surface::Library => {
+                let state = ui.global::<LibraryState>();
                 state.get_card_open() && !state.get_card_loading() && state.get_card_error().is_empty()
             }
         }
@@ -274,6 +300,7 @@ impl Controller {
         match surface {
             Surface::Pick => self.pick_card_revealed(ui, with_poster),
             Surface::Search => self.search_card_revealed(ui, with_poster),
+            Surface::Library => self.library_card_revealed(ui),
         }
     }
 
@@ -322,9 +349,9 @@ impl Controller {
         slot.groups.set_vec(groups);
     }
 
-    /// Puts a decoded logo into every chip that shows it, on both cards.
+    /// Puts a decoded logo into every chip that shows it, on every card.
     pub(super) fn place_chip_logo(&self, path: &str, image: &Image) {
-        for surface in [Surface::Pick, Surface::Search] {
+        for surface in Surface::ALL {
             let slot = self.slot(surface);
             for (group, logos) in slot.chip_logos.iter().enumerate() {
                 let Some(model) = slot.chip_models.get(group) else { continue };
@@ -436,7 +463,7 @@ impl Controller {
         kind: CardImageKind,
         pixels: SharedPixelBuffer<Rgba8Pixel>,
     ) {
-        let surface = [Surface::Pick, Surface::Search]
+        let surface = Surface::ALL
             .into_iter()
             .find(|&s| self.slot(s).images.is_some_and(|images| images.id == id));
         let Some(surface) = surface else {

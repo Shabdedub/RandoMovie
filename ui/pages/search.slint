@@ -4,7 +4,7 @@
 
 import { LineEdit, ScrollView } from "std-widgets.slint";
 import { Theme, Icons } from "../theme.slint";
-import { AppButton, ButtonKind, FontIcon, Skeleton } from "../widgets.slint";
+import { AppButton, ButtonKind, FontIcon, Notice, Skeleton } from "../widgets.slint";
 import { CardMetrics, TitleCardSkeleton, TitleCardView } from "../card.slint";
 import { SearchRow, SearchState, SearchStatus } from "../state.slint";
 
@@ -173,48 +173,6 @@ component SkeletonRow inherits HorizontalLayout {
         Skeleton {
             width: 200px;
             height: 13px;
-        }
-    }
-}
-
-// A centred message in the results area: before searching, no results, or an error.
-component Notice inherits VerticalLayout {
-    in property <string> icon;
-    in property <string> title;
-    in property <string> body;
-    in property <string> action;
-    // Problems get a muted icon, as on the Pick page; prompts keep the accent.
-    in property <bool> problem;
-    callback act();
-    alignment: center;
-    spacing: 12px;
-    padding: 32px;
-    FontIcon {
-        glyph: root.icon;
-        font-size: 40px;
-        color: root.problem ? Theme.text-muted : Theme.accent;
-    }
-    Text {
-        text: root.title;
-        font-size: Theme.subtitle;
-        font-weight: 600;
-        color: Theme.text;
-        horizontal-alignment: center;
-        wrap: word-wrap;
-    }
-    if root.body != "": Text {
-        text: root.body;
-        color: Theme.text-muted;
-        horizontal-alignment: center;
-        wrap: word-wrap;
-    }
-    if root.action != "": HorizontalLayout {
-        alignment: center;
-        AppButton {
-            text: root.action;
-            clicked => {
-                root.act();
-            }
         }
     }
 }

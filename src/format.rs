@@ -30,6 +30,25 @@ pub fn day(ts: i64) -> String {
     format!("{day} {} {year}", MONTHS[(month as usize - 1).min(11)])
 }
 
+/// How long ago something happened, from the seconds since: "just now", "5 minutes ago",
+/// "1 day ago", "4 months ago". Elapsed time needs no time zone, unlike a date.
+pub fn ago(seconds: i64) -> String {
+    const MINUTE: i64 = 60;
+    const HOUR: i64 = 60 * MINUTE;
+    if seconds < MINUTE {
+        return "just now".to_owned();
+    }
+    let (count, unit) = match seconds {
+        s if s < HOUR => (s / MINUTE, "minute"),
+        s if s < DAY => (s / HOUR, "hour"),
+        s if s < 30 * DAY => (s / DAY, "day"),
+        s if s < 365 * DAY => (s / (30 * DAY), "month"),
+        s => (s / (365 * DAY), "year"),
+    };
+    let plural = if count == 1 { "" } else { "s" };
+    format!("{count} {unit}{plural} ago")
+}
+
 pub const IMDB_UNAVAILABLE: &str = "IMDb rating unavailable";
 pub const IMDB_LOADING: &str = "Loading IMDb ratings…";
 
@@ -151,6 +170,21 @@ mod tests {
         assert_eq!(bytes(3 * 1024 * 1024 * 1024), "3.00 GB");
         let ts = crate::util::time::parse_http_date("Fri, 09 Oct 2026 12:51:19 GMT").unwrap();
         assert_eq!(day(ts), "9 Oct 2026");
+    }
+
+    #[test]
+    fn time_ago_uses_the_largest_whole_unit() {
+        assert_eq!(ago(-5), "just now", "a clock that moved back");
+        assert_eq!(ago(59), "just now");
+        assert_eq!(ago(60), "1 minute ago");
+        assert_eq!(ago(3_599), "59 minutes ago");
+        assert_eq!(ago(2 * 3_600), "2 hours ago");
+        assert_eq!(ago(DAY), "1 day ago");
+        assert_eq!(ago(29 * DAY), "29 days ago");
+        assert_eq!(ago(45 * DAY), "1 month ago");
+        assert_eq!(ago(364 * DAY), "12 months ago");
+        assert_eq!(ago(400 * DAY), "1 year ago");
+        assert_eq!(ago(800 * DAY), "2 years ago");
     }
 
     #[test]

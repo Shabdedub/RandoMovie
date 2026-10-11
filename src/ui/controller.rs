@@ -3,6 +3,7 @@
 //! settings changes are saved by the worker.
 
 mod card;
+mod library;
 mod pick;
 mod search;
 
@@ -29,6 +30,7 @@ use crate::{
     SettingsState, TokenForm, VariantRow,
 };
 use card::{CHIP_LOGO, Surface};
+use library::LibraryView;
 use pick::PickView;
 use search::SearchView;
 
@@ -66,10 +68,11 @@ pub struct Controller {
     imdb: ImdbInfo,
     /// The window's size and position when not maximized, kept current by window events.
     normal_geometry: Rc<Cell<Option<WindowGeometry>>>,
-    /// Ids for picks, searches and opened titles, unique across all of them.
+    /// Ids for picks, searches, opened titles and Library loads, unique across all of them.
     last_request_id: u64,
     pick: PickView,
     search: SearchView,
+    library: LibraryView,
 }
 
 fn logo_key(path: &str, px: u32) -> String {
@@ -118,6 +121,7 @@ impl Controller {
             last_request_id: 0,
             pick: PickView::new(media),
             search: SearchView::new(),
+            library: LibraryView::new(),
         };
         controller.initialise(ui);
         controller
@@ -187,6 +191,7 @@ impl Controller {
         self.refresh_imdb_ui(ui);
         self.init_pick(ui);
         self.init_search(ui);
+        self.init_library(ui);
     }
 
     fn send(&self, command: Command) {
@@ -264,10 +269,12 @@ impl Controller {
                 ui.global::<AppState>().set_offline(!online);
                 if online {
                     self.request_logos(ui);
-                    self.reload_card_images(ui, Surface::Pick);
-                    self.reload_card_images(ui, Surface::Search);
+                    for surface in Surface::ALL {
+                        self.reload_card_images(ui, surface);
+                    }
                     self.request_thumbs(ui);
                     self.retry_failed_search(ui);
+                    self.refresh_library(ui);
                 }
             }
             Update::Imdb(info) => {
@@ -275,8 +282,9 @@ impl Controller {
                 self.imdb = info;
                 self.refresh_imdb_ui(ui);
                 if became_ready {
-                    // Search rows that said "Loading IMDb ratings…" can show them now.
+                    // Search and Library rows without a rating can show it now.
                     self.search_availability_changed(ui);
+                    self.refresh_library(ui);
                 }
             }
             Update::CacheSize(bytes) => {
@@ -294,7 +302,10 @@ impl Controller {
             Update::PickFailed { id, error } => self.on_pick_failed(ui, id, error),
             Update::CardImage { id, kind, pixels } => self.on_card_image(ui, id, kind, pixels),
             Update::CardImdb { id, text, badge } => self.on_card_imdb(ui, id, text, badge),
-            Update::Excluded { title, reason } => self.on_excluded(ui, title, reason),
+            Update::Excluded { title, reason } => {
+                self.on_excluded(ui, title, reason);
+                self.on_library_excluded(ui, title, reason);
+            }
             Update::SearchResults {
                 id,
                 page,
@@ -303,10 +314,24 @@ impl Controller {
             } => self.on_search_results(ui, id, page, total_pages, hits),
             Update::SearchFailed { id, page, error } => self.on_search_failed(ui, id, page, error),
             Update::SearchHitInfo { id, title, info } => self.on_search_hit_info(ui, id, title, info),
-            Update::Thumb { spec, pixels } => self.on_thumb(ui, spec, pixels),
-            Update::ThumbFailed(spec) => self.on_thumb_failed(spec),
+            Update::Thumb { spec, pixels } => {
+                self.on_library_thumb(ui, &spec, &pixels);
+                self.on_thumb(ui, spec, pixels);
+            }
+            Update::ThumbFailed(spec) => {
+                self.on_library_thumb_failed(&spec);
+                self.on_thumb_failed(spec);
+            }
+            Update::TitleCard { id, card } if self.library_opening(id) => {
+                self.on_library_title_card(ui, id, *card);
+            }
             Update::TitleCard { id, card } => self.on_title_card(ui, id, *card),
+            Update::TitleCardFailed { id, error } if self.library_opening(id) => {
+                self.on_library_title_card_failed(ui, id, error);
+            }
             Update::TitleCardFailed { id, error } => self.on_title_card_failed(ui, id, error),
+            Update::Library { id, items } => self.on_library(ui, id, items),
+            Update::LibraryItem { id, item } => self.on_library_item(ui, id, item),
         }
     }
 
@@ -377,6 +402,7 @@ impl Controller {
                     self.release_card_images(ui, Surface::Search);
                     self.release_thumbs();
                 }
+                Page::Library => self.library_hidden(ui),
                 _ => {}
             }
             match page {
@@ -386,6 +412,7 @@ impl Controller {
                     self.reload_card_images(ui, Surface::Search);
                     self.request_thumbs(ui);
                 }
+                Page::Library => self.library_shown(ui),
                 _ => {}
             }
         }
@@ -532,11 +559,8 @@ impl Controller {
             )
             .collect();
         // Chips on the card of the page that shows.
-        let card = match ui.global::<AppState>().get_page() {
-            Page::Pick => Some(Surface::Pick),
-            Page::Search => Some(Surface::Search),
-            _ => None,
-        };
+        let page = ui.global::<AppState>().get_page();
+        let card = Surface::ALL.into_iter().find(|surface| surface.page() == page);
         if let Some(surface) = card {
             wanted.extend(self.slot(surface).chip_logo_paths().map(|p| (p.to_owned(), chip_px)));
         }
@@ -843,12 +867,14 @@ impl Controller {
         self.logos.clear();
         self.pending_logos.clear();
         self.refresh_services(ui);
-        for surface in [Surface::Pick, Surface::Search] {
+        for surface in Surface::ALL {
             self.release_card_images(ui, surface);
             self.reload_card_images(ui, surface);
         }
         self.release_thumbs();
         self.request_thumbs(ui);
+        self.release_library_thumbs();
+        self.request_library_thumbs(ui);
         self.send_poster_width(ui);
     }
 

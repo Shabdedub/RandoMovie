@@ -205,7 +205,7 @@ impl Worker {
         Ok(genres)
     }
 
-    fn excluded(&self, title: TitleRef) -> Option<ExclusionReason> {
+    pub(super) fn excluded(&self, title: TitleRef) -> Option<ExclusionReason> {
         self.store.exclusion_reason(title).unwrap_or_else(|e| {
             log_warn!("exclusion lookup failed: {e}");
             None
@@ -423,8 +423,9 @@ impl Worker {
         });
     }
 
-    /// "Seen it" / "Not interested" (`Some`) or their undo (`None`).
-    pub(super) fn set_exclusion(&self, title: TitleRef, reason: Option<ExclusionReason>) {
+    /// "Seen it" / "Not interested" (`Some`) or their undo (`None`). A newly marked title also
+    /// gets its name, year and poster saved for the Library.
+    pub(super) async fn set_exclusion(&self, title: TitleRef, reason: Option<ExclusionReason>) {
         let saved = match reason {
             Some(reason) => self.store.exclude(title, reason, now_unix()),
             None => self.store.unexclude(title),
@@ -437,6 +438,13 @@ impl Worker {
             }
         };
         self.emit(Update::Excluded { title, reason });
+        if reason.is_some()
+            && self.store.needs_title_summary(title).unwrap_or(false)
+            && let Some(client) = self.client()
+        {
+            let region = self.effective_region();
+            self.remember_summary(&client, &region, title).await;
+        }
     }
 
     // ---- Card images -----------------------------------------------------------------

@@ -3,7 +3,8 @@
 RandoMovie answers "what should I watch tonight?" with one click. It picks a random movie or
 series that you can stream right now in your country, on the services you have or for free,
 and shows its IMDb rating and where to watch it. A search mode answers "where can I watch X,
-and is it on my services?".
+and is it on my services?", and the Library lists the titles you've marked as watched or not
+interested.
 
 It is a native Windows app written in Rust with a Slint UI. It is for personal,
 non-commercial use.
@@ -17,11 +18,13 @@ non-commercial use.
 | 3 | Pick screen: verification, filters, history, exclusions, prefetch | Done |
 | 4 | Search and the shared title card | Done |
 | 5 | Polish, accessibility, performance measurement, final README | Done |
+| After 5 | The Library: what you marked as watched or not interested (0.6.0) | Done |
 
-Every screen works: first run, Pick, Search, My Services, Settings and About. The final build
-(0.5.0) meets every budget in the spec: 0 % CPU at idle, about 22 MB of private memory after 30
-titles, a window on screen about 50 ms after launch, and a 13.17 MB exe. PERFORMANCE.md has the
-measurements and how they were taken.
+Every screen works: first run, Pick, Search, Library, My Services, Settings and About. Phase 5's
+build (0.5.0) met every budget in the spec: 0 % CPU at idle, about 22 MB of private memory after
+30 titles, and a window on screen about 50 ms after launch. With the Library (0.6.0) the exe is
+13.63 MB, still under the 15 MB budget. PERFORMANCE.md has the measurements and how they were
+taken.
 
 ## Prerequisites
 
@@ -103,6 +106,19 @@ floor, clear the cache, refresh the IMDb ratings, and change or remove the token
 - **Load more results** fetches the next page. With the keyboard, Down on the last result does
   the same.
 
+## Library
+
+- **Library** in the navigation rail lists every title you've marked on the Pick screen, in two
+  tabs: **Watched** for "Seen it", and **Not interested**. The most recently marked come first,
+  each with its poster, type and year, IMDb rating, and when you marked it.
+- **Open a title** for its card, with where to watch it now. **Remove from …** takes it off the
+  list so it can be picked again, and **Move to …** puts it on the other list, still out of
+  picks.
+- **Remove** on a row, or Delete with the keyboard, takes it off the list without opening it.
+  **Undo** brings back the last removal or move.
+- The Library reads the local database, so it opens instantly and works offline. Titles marked
+  before version 0.6.0 load their name and poster from TMDB once, the first time it opens.
+
 ## Keyboard and accessibility
 
 Everything works from the keyboard. Tab and Shift+Tab move between controls, and the focused
@@ -116,10 +132,11 @@ one gets an accent ring. Clicking with the mouse never shows the ring.
 | Left / Right | Movies / Series / Both and the other choice rows: change the choice |
 | Arrow keys | My Services: move between service tiles |
 | Enter, Space or Down on a filter | Open its panel, with focus on the panel's first control |
-| Down / Up | In Search: from the box into the results, then from result to result |
-| Home, End, Page Up, Page Down | In Search: jump through the results |
-| Enter | In Search: open the selected result |
-| Esc | Close the open panel (focus returns to its button), side sheet or result; otherwise leave a text field |
+| Down / Up | In Search: from the box into the results, then from result to result. In the Library: from title to title |
+| Home, End, Page Up, Page Down | In Search and the Library: jump through the list |
+| Enter | In Search and the Library: open the selected title |
+| Delete | In the Library: take the selected title off its list |
+| Esc | Close the open panel (focus returns to its button), side sheet or title; otherwise leave a text field |
 
 For screen readers such as Narrator and NVDA:
 
@@ -144,7 +161,7 @@ text fields is an unnamed image that works only with the mouse.
 |---|---|
 | Settings | `%APPDATA%\RandoMovie\settings.json` |
 | TMDB token | Windows Credential Manager, generic credential `RandoMovie/TMDB` |
-| Cache database: API responses, images, pick history, exclusions | `%LOCALAPPDATA%\RandoMovie\cache.sqlite3` |
+| Cache database: API responses, images, pick history, and the Library's marked titles | `%LOCALAPPDATA%\RandoMovie\cache.sqlite3` |
 | IMDb ratings index and its metadata | `%LOCALAPPDATA%\RandoMovie\imdb\` |
 | Log, capped at about 1 MB | `%LOCALAPPDATA%\RandoMovie\logs\` |
 
@@ -289,6 +306,21 @@ The spec left these points open. Each choice favours fast, light and predictable
 - **First launch.** Windows checks a newly built or downloaded exe once before starting it.
   That took about 1 s in testing (2.4 s right after a build) and happens only on the first
   launch of each new exe; the app itself shows its window about 50 ms after it starts.
+- **Library tabs.** They're called "Watched" and "Not interested", the words people use for
+  the lists; the Pick screen's button stays "Seen it".
+- **Marked titles keep their details.** Marking a title saves its name, year, poster and IMDb
+  id with the mark, taken from the details already cached for the card, so the Library needs
+  no network. Titles marked before the Library existed get them once, four at a time, the
+  first time it opens; one that can't be loaded offline says so and tries again online.
+- **Times in the Library.** Rows say "Marked 3 days ago" rather than a date: elapsed time
+  needs no time zone, and dates in UTC could be a day off in Australia. They're worked out
+  each time the Library opens.
+- **Removing, moving and Undo.** Removing a title makes it pickable again. Moving it to the
+  other list keeps it out of picks and dates it now. Undo restores the title exactly, original
+  date included, until you switch tabs, open another title or leave the page.
+- **Database upgrade.** The Library added four columns to the table of marked titles (schema
+  version 2). They're added only when missing, so a database an older version opened in the
+  meantime still upgrades.
 
 ## Acceptance checks
 

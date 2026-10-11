@@ -2,11 +2,12 @@
 
 use randomovie::card::{ImdbBadge, TitleCard};
 use randomovie::error::ApiError;
+use randomovie::imdb::ImdbStatus;
 use randomovie::media::{MediaChoice, TitleRef};
 use randomovie::picker::PickError;
 use randomovie::search::{HitInfo, SearchHit};
 use randomovie::services::ServiceCatalog;
-use randomovie::store::{ExclusionReason, Settings};
+use randomovie::store::{ExclusionReason, Settings, TitleSummary};
 use randomovie::tmdb::model::Region;
 use slint::{Rgba8Pixel, SharedPixelBuffer};
 
@@ -57,9 +58,27 @@ pub enum Command {
     SearchInfo { id: u64, titles: Vec<TitleRef> },
     /// Result thumbnails at exact physical sizes.
     LoadThumbs(Vec<ImageSpec>),
-    /// The title card for a search result.
+    /// The title card for a search result or a Library title.
     OpenTitle { id: u64, title: TitleRef },
+    /// Every title in the Library. `id` identifies the answer.
+    LoadLibrary { id: u64 },
+    /// Undo in the Library: the title marked again exactly as it was.
+    Restore(LibraryItem),
     Shutdown,
+}
+
+/// A title in the Library: marked "Seen it" or "Not interested".
+#[derive(Debug, Clone)]
+pub struct LibraryItem {
+    pub title: TitleRef,
+    pub reason: ExclusionReason,
+    /// When it was marked, in unix seconds.
+    pub marked_at: i64,
+    /// `None` while the details of a title marked before the Library existed load.
+    pub summary: Option<TitleSummary>,
+    pub imdb: ImdbStatus,
+    /// Its details couldn't be loaded: offline, or TMDB no longer has it.
+    pub unavailable: bool,
 }
 
 /// An image path and the exact physical pixels it will be drawn at.
@@ -181,7 +200,7 @@ pub enum Update {
         pixels: SharedPixelBuffer<Rgba8Pixel>,
     },
     ThumbFailed(ImageSpec),
-    /// The card for an opened search result.
+    /// The card for an opened search result or Library title.
     TitleCard {
         id: u64,
         card: Box<TitleCard>,
@@ -189,5 +208,15 @@ pub enum Update {
     TitleCardFailed {
         id: u64,
         error: ApiError,
+    },
+    /// The Library's titles, the most recently marked first.
+    Library {
+        id: u64,
+        items: Vec<LibraryItem>,
+    },
+    /// A Library title whose details have just loaded, or couldn't be.
+    LibraryItem {
+        id: u64,
+        item: LibraryItem,
     },
 }

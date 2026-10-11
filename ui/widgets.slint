@@ -373,6 +373,48 @@ export component InlineMessage inherits Rectangle {
     }
 }
 
+// A centred message in a list's place: before searching, an empty list, or an error.
+export component Notice inherits VerticalLayout {
+    in property <string> icon;
+    in property <string> title;
+    in property <string> body;
+    in property <string> action;
+    // Problems get a muted icon, as on the Pick page; prompts keep the accent.
+    in property <bool> problem;
+    callback act();
+    alignment: center;
+    spacing: 12px;
+    padding: 32px;
+    FontIcon {
+        glyph: root.icon;
+        font-size: 40px;
+        color: root.problem ? Theme.text-muted : Theme.accent;
+    }
+    Text {
+        text: root.title;
+        font-size: Theme.subtitle;
+        font-weight: 600;
+        color: Theme.text;
+        horizontal-alignment: center;
+        wrap: word-wrap;
+    }
+    if root.body != "": Text {
+        text: root.body;
+        color: Theme.text-muted;
+        horizontal-alignment: center;
+        wrap: word-wrap;
+    }
+    if root.action != "": HorizontalLayout {
+        alignment: center;
+        AppButton {
+            text: root.action;
+            clicked => {
+                root.act();
+            }
+        }
+    }
+}
+
 // A static placeholder block shown while content loads (no shimmer: nothing animates idle).
 // Screen readers skip it: a plain Rectangle isn't exposed (see FontIcon for why it doesn't set
 // `accessible-role: none`).
@@ -386,6 +428,9 @@ export component TextButton inherits Rectangle {
     in property <string> text;
     in property <string> icon;
     in property <string> accessible-text: root.text;
+    // False for a button repeated on every row of a list, which offers the same action from
+    // the keyboard, so Tab doesn't stop on each one.
+    in property <bool> tab-stop: true;
     callback clicked();
 
     min-width: row.min-width;
@@ -401,6 +446,7 @@ export component TextButton inherits Rectangle {
 
     focus := FocusScope {
         focus-on-click: false;
+        focus-on-tab-navigation: root.tab-stop;
         key-pressed(event) => {
             if (event.text == Key.Return || event.text == Key.Space) {
                 root.clicked();

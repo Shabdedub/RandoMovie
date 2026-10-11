@@ -1,4 +1,4 @@
-// The slim navigation rail: Pick, Search, My Services, and Settings at the bottom.
+// The slim navigation rail: Pick, Search, Library, My Services, and Settings at the bottom.
 
 import { Theme, Icons } from "theme.slint";
 import { FontIcon } from "widgets.slint";
@@ -145,6 +145,21 @@ export component NavRail inherits Rectangle {
                 if (delta < 0) {
                     pick-item.focus-item();
                 } else {
+                    library-item.focus-item();
+                }
+            }
+        }
+        library-item := NavItem {
+            icon: Icons.library;
+            label: "Library";
+            selected: root.page == Page.library;
+            activate => {
+                root.navigate(Page.library);
+            }
+            step(delta) => {
+                if (delta < 0) {
+                    search-item.focus-item();
+                } else {
                     services-item.focus-item();
                 }
             }
@@ -158,7 +173,7 @@ export component NavRail inherits Rectangle {
             }
             step(delta) => {
                 if (delta < 0) {
-                    search-item.focus-item();
+                    library-item.focus-item();
                 } else {
                     settings-item.focus-item();
                 }

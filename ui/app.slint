@@ -10,6 +10,7 @@ import { TokenDialog } from "token.slint";
 import { AppState, Page, PickState, SearchState, TokenForm } from "state.slint";
 import { PickPage } from "pages/pick.slint";
 import { SearchPage } from "pages/search.slint";
+import { LibraryPage } from "pages/library.slint";
 import { ServicesPage } from "pages/services.slint";
 import { SettingsPage } from "pages/settings.slint";
 import { OnboardingView } from "pages/onboarding.slint";
@@ -18,9 +19,9 @@ export { Theme } from "theme.slint";
 export { CardMetrics } from "card.slint";
 export { SearchMetrics } from "pages/search.slint";
 export {
-    AppState, Exclusion, GenreOption, OnboardingState, OnboardingStep, Page, PickState, PickStatus,
-    SearchRow, SearchState, SearchStatus, ServicesState, ServiceTile, SettingsState, TitleCardData,
-    TokenForm, VariantRow, WatchChip, WatchGroup,
+    AppState, Exclusion, GenreOption, LibraryRow, LibraryState, OnboardingState, OnboardingStep, Page,
+    PickState, PickStatus, SearchRow, SearchState, SearchStatus, ServicesState, ServiceTile,
+    SettingsState, TitleCardData, TokenForm, VariantRow, WatchChip, WatchGroup,
 } from "state.slint";
 
 component OfflineBanner inherits Rectangle {
@@ -65,10 +66,11 @@ export component AppWindow inherits Window {
     }
 
     // When the page or the side sheet that held the focus goes away, keys come back to the
-    // window, so Space, Enter and Ctrl+F keep working. Search puts it in its own box.
+    // window, so Space, Enter and Ctrl+F keep working. Search puts it in its own box, and the
+    // Library in its list.
     property <Page> current-page: AppState.page;
     changed current-page => {
-        if (self.current-page != Page.search) {
+        if (self.current-page != Page.search && self.current-page != Page.library) {
             keys.focus();
         }
     }
@@ -129,6 +131,7 @@ export component AppWindow inherits Window {
                     vertical-stretch: 1;
                     if AppState.page == Page.pick: PickPage { }
                     if AppState.page == Page.search: SearchPage { }
+                    if AppState.page == Page.library: LibraryPage { }
                     if AppState.page == Page.services: ServicesPage { }
                     if AppState.page == Page.settings: SettingsPage { }
                 }

@@ -1,7 +1,7 @@
 // State shared between the Slint UI and Rust. Rust owns the data and sets these
 // properties; the UI reports user actions through the callbacks.
 
-export enum Page { pick, search, services, settings }
+export enum Page { pick, search, library, services, settings }
 
 export enum OnboardingStep { token, region, services }
 
@@ -230,6 +230,58 @@ export global SearchState {
     callback close-card();
     callback load-more();
     callback retry();
+    callback open-where-to-watch();
+    callback card-resized(length, length, length, length);
+}
+
+// ---- Library -----------------------------------------------------------------------------
+
+// One title in the Library. `pending`: its name and poster are still loading (a title marked
+// before the Library existed).
+export struct LibraryRow {
+    name: string,
+    meta: string,
+    thumb: image,
+    // "7.3 IMDb · 198K votes" (the star is drawn as an icon), or empty.
+    imdb: string,
+    marked: string,
+    pending: bool,
+}
+
+export global LibraryState {
+    // 0 Watched (marked "Seen it"), 1 Not interested.
+    in-out property <int> tab;
+    in property <[string]> tabs: ["Watched", "Not interested"];
+    in property <[LibraryRow]> rows;
+    in-out property <int> selected: -1;
+    // Until the first list arrives, so the empty message doesn't flash.
+    in property <bool> loading: true;
+    // What the last removal or move did, with Undo.
+    in property <string> notice;
+    in property <bool> can-undo;
+    // Bumped when the tab changes, to scroll the list back to the top.
+    in-out property <int> list-serial;
+
+    // The opened title, shown over the list, which keeps its place.
+    in property <bool> card-open;
+    in property <bool> card-loading;
+    in property <string> card-error;
+    in property <TitleCardData> card;
+    in property <int> card-serial;
+    in property <[WatchGroup]> groups;
+    in property <image> poster;
+    in property <image> backdrop;
+    in property <string> announcement;
+
+    callback tab-selected(int);
+    callback open(int);
+    // Takes the title off its list, so it can be picked again.
+    callback remove(int);
+    // The same for the opened title, and moving it to the other list.
+    callback remove-open();
+    callback move-open();
+    callback undo();
+    callback close-card();
     callback open-where-to-watch();
     callback card-resized(length, length, length, length);
 }

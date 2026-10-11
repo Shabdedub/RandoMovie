@@ -3,12 +3,14 @@
 //! back as `Update`s through a sink that posts them to the UI thread's event loop.
 
 mod images;
+mod library;
 mod messages;
 mod pick;
 mod search;
 
 pub use messages::{
-    CardImageKind, Command, ImageSpec, ImdbInfo, LogoRequest, TokenSource, TokenStatus, Update,
+    CardImageKind, Command, ImageSpec, ImdbInfo, LibraryItem, LogoRequest, TokenSource, TokenStatus,
+    Update,
 };
 
 use std::cell::{Cell, RefCell};
@@ -187,8 +189,8 @@ impl Worker {
             Command::Pick { id, media } => self.pick(id, media).await,
             Command::Prefetch { media } => self.refresh_prefetch(Some(media)).await,
             Command::Previous { id } => self.previous(id).await,
-            Command::Exclude { title, reason } => self.set_exclusion(title, Some(reason)),
-            Command::Unexclude { title } => self.set_exclusion(title, None),
+            Command::Exclude { title, reason } => self.set_exclusion(title, Some(reason)).await,
+            Command::Unexclude { title } => self.set_exclusion(title, None).await,
             Command::PosterWidth(width) => self.set_poster_width(width),
             Command::LoadCardImages {
                 id,
@@ -199,6 +201,8 @@ impl Worker {
             Command::SearchInfo { id, titles } => self.load_row_info(id, titles).await,
             Command::LoadThumbs(specs) => self.load_thumbs(specs),
             Command::OpenTitle { id, title } => self.open_title(id, title).await,
+            Command::LoadLibrary { id } => self.load_library(id).await,
+            Command::Restore(item) => self.restore(item),
             Command::SaveSettings(_) | Command::Shutdown => {}
         }
     }

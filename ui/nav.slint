@@ -9,6 +9,12 @@ component NavItem inherits Rectangle {
     in property <string> label;
     in property <bool> selected;
     callback activate();
+    // Up and Down arrows: -1 for the item above, 1 for the item below.
+    callback step(int);
+
+    public function focus-item() {
+        focus.focus();
+    }
 
     height: 60px;
     border-radius: Theme.radius-control;
@@ -31,6 +37,14 @@ component NavItem inherits Rectangle {
         key-pressed(event) => {
             if (event.text == Key.Return || event.text == Key.Space) {
                 root.activate();
+                return accept;
+            }
+            if (event.text == Key.UpArrow) {
+                root.step(-1);
+                return accept;
+            }
+            if (event.text == Key.DownArrow) {
+                root.step(1);
                 return accept;
             }
             reject
@@ -70,6 +84,7 @@ component NavItem inherits Rectangle {
             horizontal-alignment: center;
             color: root.selected ? Theme.text : Theme.text-muted;
             overflow: elide;
+            accessible-role: none;
         }
     }
 
@@ -104,39 +119,65 @@ export component NavRail inherits Rectangle {
                 accessible-role: none;
             }
         }
-        NavItem {
+        // Arrows only move focus; Enter or Space opens the page (as in Windows' own navigation
+        // panes), so a screen reader user can hear each item before switching.
+        pick-item := NavItem {
             icon: Icons.shuffle;
             label: "Pick";
             selected: root.page == Page.pick;
             activate => {
                 root.navigate(Page.pick);
             }
+            step(delta) => {
+                if (delta > 0) {
+                    search-item.focus-item();
+                }
+            }
         }
-        NavItem {
+        search-item := NavItem {
             icon: Icons.search;
             label: "Search";
             selected: root.page == Page.search;
             activate => {
                 root.navigate(Page.search);
             }
+            step(delta) => {
+                if (delta < 0) {
+                    pick-item.focus-item();
+                } else {
+                    services-item.focus-item();
+                }
+            }
         }
-        NavItem {
+        services-item := NavItem {
             icon: Icons.tv;
             label: "My Services";
             selected: root.page == Page.services;
             activate => {
                 root.navigate(Page.services);
             }
+            step(delta) => {
+                if (delta < 0) {
+                    search-item.focus-item();
+                } else {
+                    settings-item.focus-item();
+                }
+            }
         }
         Rectangle {
             vertical-stretch: 1;
         }
-        NavItem {
+        settings-item := NavItem {
             icon: Icons.settings;
             label: "Settings";
             selected: root.page == Page.settings;
             activate => {
                 root.navigate(Page.settings);
+            }
+            step(delta) => {
+                if (delta < 0) {
+                    services-item.focus-item();
+                }
             }
         }
     }

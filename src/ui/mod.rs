@@ -8,6 +8,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use randomovie::paths::AppPaths;
+use randomovie::picker::filters;
 use randomovie::platform;
 use randomovie::store::{Settings, Theme as ThemeSetting, WindowGeometry};
 use randomovie::{log_info, log_warn};
@@ -41,7 +42,8 @@ pub(crate) fn with_controller(weak: &slint::Weak<AppWindow>, action: impl FnOnce
 }
 
 pub fn run(paths: AppPaths, launched: Instant) -> Result<(), Box<dyn Error>> {
-    let settings = Settings::load(&paths.settings_file());
+    let mut settings = Settings::load(&paths.settings_file());
+    filters::snap_to_steps(&mut settings.filters);
     let system_dark = platform::theme::system_prefers_dark();
     let dark = resolve_dark(settings.theme, system_dark);
     let geometry = initial_geometry(&settings);

@@ -273,7 +273,10 @@ impl Controller {
         state.set_loading_more(false);
         state.set_has_more(page < total_pages);
         if count == 0 {
-            state.set_message(format!("No movies or series match “{query}”.").into());
+            state.set_message(
+                format!("No movies or series match “{query}”. Check the spelling, or try fewer words.")
+                    .into(),
+            );
             state.set_heading(SharedString::new());
             state.set_status(SearchStatus::Empty);
         } else {

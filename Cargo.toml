@@ -1,6 +1,6 @@
 [package]
 name = "randomovie"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 rust-version = "1.92"
 description = "RandoMovie: a lightweight random movie and series picker for Windows"
@@ -58,3 +58,10 @@ strip = true
 opt-level = 3
 # No unwinding tables: smaller exe. The panic hook still logs the panic before exiting.
 panic = "abort"
+
+[patch.crates-io]
+# Slint 1.18.1 always turns on parley's "complex-scripts", which links ICU4X's line-break
+# dictionaries for Thai, Lao, Khmer, Burmese, Chinese and Japanese: 3.6 MB, enough to break the
+# 15 MB budget on its own. This copy of parley 0.11.1 always uses the rule-based segmenters.
+# vendor/parley/RANDOMOVIE-PATCH.md explains the change and how to update it.
+parley = { path = "vendor/parley" }

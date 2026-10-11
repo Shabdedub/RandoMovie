@@ -7,12 +7,30 @@ import { ServicesState, ServiceTile } from "state.slint";
 
 component ServiceTileView inherits Rectangle {
     in property <ServiceTile> tile;
+    // Set by the grid when arrow keys move focus to this tile.
+    in property <bool> wants-focus;
     callback toggle();
     callback open-variants();
+    // Arrow keys: columns and rows to move, such as (1, 0) for Right.
+    callback step(int, int);
+    // The tile took keyboard focus (from an arrow key or Tab).
+    callback focused();
 
     property <bool> on: root.tile.state == 2;
     property <bool> partial: root.tile.state == 1;
     property <bool> selected: root.on || root.partial;
+    property <bool> keyboard-focused: focus.has-focus;
+
+    changed wants-focus => {
+        if (root.wants-focus) {
+            focus.focus();
+        }
+    }
+    changed keyboard-focused => {
+        if (root.keyboard-focused) {
+            root.focused();
+        }
+    }
 
     border-radius: Theme.radius-card;
     background: touch.pressed ? Theme.pressed
@@ -45,6 +63,22 @@ component ServiceTileView inherits Rectangle {
             key-pressed(event) => {
                 if (event.text == Key.Return || event.text == Key.Space) {
                     root.toggle();
+                    return accept;
+                }
+                if (event.text == Key.LeftArrow) {
+                    root.step(-1, 0);
+                    return accept;
+                }
+                if (event.text == Key.RightArrow) {
+                    root.step(1, 0);
+                    return accept;
+                }
+                if (event.text == Key.UpArrow) {
+                    root.step(0, -1);
+                    return accept;
+                }
+                if (event.text == Key.DownArrow) {
+                    root.step(0, 1);
                     return accept;
                 }
                 reject
@@ -197,7 +231,34 @@ export component ServicesPanel inherits VerticalLayout {
     in property <length> min-tile-width: 124px;
     property <length> tile-height: 118px;
     property <length> gap: 12px;
+    // Room around the tiles for their focus rings, which the scroll view would otherwise clip.
+    property <length> inset: 4px;
+    // The tile arrow keys move from: the one that last took focus.
+    property <int> focus-index: -1;
     spacing: 12px;
+
+    // Arrow keys in the grid. Left and Right follow reading order; Up and Down keep the
+    // column, and Down from a row above a shorter last row goes to the last tile.
+    function step-focus(from: int, columns: int, rows: int) {
+        let last = ServicesState.tiles.length - 1;
+        let target = from + columns + rows * scroll.columns;
+        if (target >= 0 && target <= last) {
+            root.focus-index = target;
+        } else if (rows > 0 && floor(last / scroll.columns) > floor(from / scroll.columns)) {
+            root.focus-index = last;
+        }
+    }
+
+    // Scrolls the grid so the tile at `index` and its focus ring are in view.
+    function reveal(index: int) {
+        let top = floor(index / scroll.columns) * (root.tile-height + root.gap);
+        let bottom = top + root.tile-height + 2 * root.inset;
+        if (top < -scroll.content-y) {
+            scroll.content-y = min(0px, -top);
+        } else if (bottom > scroll.visible-height - scroll.content-y) {
+            scroll.content-y = max(scroll.visible-height - scroll.content-height, scroll.visible-height - bottom);
+        }
+    }
 
     Rectangle {
         border-radius: Theme.radius-control;
@@ -270,46 +331,64 @@ export component ServicesPanel inherits VerticalLayout {
         wrap: word-wrap;
     }
 
-    scroll := ScrollView {
+    // The scroll view overhangs this slot by the inset on every side and insets its tiles by as
+    // much, so the tiles line up with the controls above and their focus rings still show.
+    Rectangle {
         vertical-stretch: 1;
         min-height: 160px;
-        property <int> columns: max(1, floor((self.visible-width + root.gap) / (root.min-tile-width + root.gap)));
-        property <length> tile-width: (self.visible-width - (self.columns - 1) * root.gap) / self.columns;
-        property <int> skeletons: ServicesState.loading && ServicesState.tiles.length == 0 ? 12 : 0;
-        property <int> count: max(self.skeletons, ServicesState.tiles.length);
-        property <int> rows: ceil(self.count / self.columns);
-        content-width: self.visible-width;
-        content-height: self.rows * (root.tile-height + root.gap) + (ServicesState.hidden-count > 0 ? 48px : 0px);
 
-        for index in scroll.skeletons: Skeleton {
-            x: mod(index, scroll.columns) * (scroll.tile-width + root.gap);
-            y: floor(index / scroll.columns) * (root.tile-height + root.gap);
-            width: scroll.tile-width;
-            height: root.tile-height;
-            border-radius: Theme.radius-card;
-        }
+        scroll := ScrollView {
+            x: -root.inset;
+            y: -root.inset;
+            width: parent.width + 2 * root.inset;
+            height: parent.height + 2 * root.inset;
+            property <length> grid-width: self.visible-width - 2 * root.inset;
+            property <int> columns: max(1, floor((self.grid-width + root.gap) / (root.min-tile-width + root.gap)));
+            property <length> tile-width: (self.grid-width - (self.columns - 1) * root.gap) / self.columns;
+            property <int> skeletons: ServicesState.loading && ServicesState.tiles.length == 0 ? 12 : 0;
+            property <int> count: max(self.skeletons, ServicesState.tiles.length);
+            property <int> rows: ceil(self.count / self.columns);
+            content-width: self.visible-width;
+            content-height: 2 * root.inset + self.rows * (root.tile-height + root.gap) + (ServicesState.hidden-count > 0 ? 48px : 0px);
 
-        for tile[index] in ServicesState.tiles: ServiceTileView {
-            x: mod(index, scroll.columns) * (scroll.tile-width + root.gap);
-            y: floor(index / scroll.columns) * (root.tile-height + root.gap);
-            width: scroll.tile-width;
-            height: root.tile-height;
-            tile: tile;
-            toggle => {
-                ServicesState.toggle(tile.key);
+            for index in scroll.skeletons: Skeleton {
+                x: root.inset + mod(index, scroll.columns) * (scroll.tile-width + root.gap);
+                y: root.inset + floor(index / scroll.columns) * (root.tile-height + root.gap);
+                width: scroll.tile-width;
+                height: root.tile-height;
+                border-radius: Theme.radius-card;
             }
-            open-variants => {
-                ServicesState.open-variants(tile.key);
-            }
-        }
 
-        if ServicesState.hidden-count > 0: AppButton {
-            x: 0;
-            y: scroll.rows * (root.tile-height + root.gap);
-            text: "Show all services (" + ServicesState.hidden-count + " more)";
-            icon: Icons.chevron-down;
-            clicked => {
-                ServicesState.show-all();
+            for tile[index] in ServicesState.tiles: ServiceTileView {
+                x: root.inset + mod(index, scroll.columns) * (scroll.tile-width + root.gap);
+                y: root.inset + floor(index / scroll.columns) * (root.tile-height + root.gap);
+                width: scroll.tile-width;
+                height: root.tile-height;
+                tile: tile;
+                wants-focus: index == root.focus-index;
+                toggle => {
+                    ServicesState.toggle(tile.key);
+                }
+                open-variants => {
+                    ServicesState.open-variants(tile.key);
+                }
+                step(columns, rows) => {
+                    root.step-focus(index, columns, rows);
+                }
+                focused => {
+                    root.focus-index = index;
+                    root.reveal(index);
+                }
+            }
+
+            if ServicesState.hidden-count > 0: AppButton {
+                x: root.inset;
+                y: root.inset + scroll.rows * (root.tile-height + root.gap);
+                text: "Show all services (" + ServicesState.hidden-count + " more)";
+                icon: Icons.chevron-down;
+                clicked => {
+                    ServicesState.show-all();
+                }
             }
         }
     }

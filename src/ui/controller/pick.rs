@@ -136,7 +136,9 @@ fn describe(error: &PickError, filters_narrow: bool) -> (&'static str, String, E
         ),
         PickError::NothingMatches => (
             "Nothing matches",
-            "Nothing on your services qualified. Add services or turn on free titles.".to_owned(),
+            "Nothing on your services qualified. Picks count subscription and free titles, not \
+             stores that only rent or sell. Add services or turn on free titles."
+                .to_owned(),
             ErrorAction::ChooseServices,
         ),
         PickError::Api(ApiError::Unauthorized) => (

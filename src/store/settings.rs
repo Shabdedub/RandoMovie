@@ -109,8 +109,10 @@ impl Default for Settings {
 
 impl Settings {
     /// Parses settings JSON of any known version. Returns the settings and the version the
-    /// text was written in.
+    /// text was written in. A leading byte-order mark, which some Windows editors add, is
+    /// ignored.
     pub fn from_json(text: &str) -> Result<(Settings, u32), serde_json::Error> {
+        let text = text.strip_prefix('\u{feff}').unwrap_or(text);
         let mut value: Value = serde_json::from_str(text)?;
         let from = value
             .get("version")
@@ -324,6 +326,13 @@ mod tests {
         assert_eq!(s.filters.genres, ["Drama", "Comedy"]);
         let w = s.window.unwrap();
         assert_eq!((w.width, w.height), (MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT));
+    }
+
+    #[test]
+    fn accepts_a_byte_order_mark() {
+        // As saved by Notepad on older Windows or by PowerShell 5's `-Encoding utf8`.
+        let (s, _) = Settings::from_json("\u{feff}{ \"version\": 1, \"include_free\": false }").unwrap();
+        assert!(!s.include_free);
     }
 
     #[test]

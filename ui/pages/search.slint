@@ -183,6 +183,8 @@ component Notice inherits VerticalLayout {
     in property <string> title;
     in property <string> body;
     in property <string> action;
+    // Problems get a muted icon, as on the Pick page; prompts keep the accent.
+    in property <bool> problem;
     callback act();
     alignment: center;
     spacing: 12px;
@@ -190,7 +192,7 @@ component Notice inherits VerticalLayout {
     FontIcon {
         glyph: root.icon;
         font-size: 40px;
-        color: Theme.accent;
+        color: root.problem ? Theme.text-muted : Theme.accent;
     }
     Text {
         text: root.title;
@@ -429,6 +431,7 @@ export component SearchPage inherits Rectangle {
                 }
                 if SearchState.rows.length == 0 && SearchState.status == SearchStatus.failed: Notice {
                     icon: Icons.info;
+                    problem: true;
                     title: "Search didn't work";
                     body: SearchState.message;
                     action: "Try again";
@@ -482,8 +485,13 @@ export component SearchPage inherits Rectangle {
                             border-color: Theme.border;
                             Notice {
                                 icon: Icons.info;
+                                problem: true;
                                 title: "This title didn't load";
                                 body: SearchState.card-error;
+                                action: "Try again";
+                                act => {
+                                    SearchState.open(SearchState.selected);
+                                }
                             }
                         }
                         if SearchState.card-open && !SearchState.card-loading && SearchState.card-error == "": TitleCardView {

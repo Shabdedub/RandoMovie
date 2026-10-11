@@ -5,18 +5,34 @@
 import { Spinner } from "std-widgets.slint";
 import { Theme, Icons } from "theme.slint";
 
-export component FontIcon inherits Text {
+// A glyph from the icon font. Icons are decorative (the control or text beside them carries the
+// name), so screen readers skip them. The glyph is a child rather than the root because Slint
+// only honours `accessible-role: none` on the element that sets it: set on the root, every
+// FontIcon would still show up to screen readers as an unnamed node.
+export component FontIcon {
     in property <string> glyph;
-    text: glyph;
-    font-family: Theme.icon-font;
-    font-size: 16px;
-    color: Theme.text;
-    horizontal-alignment: center;
-    vertical-alignment: center;
+    in property <color> color: Theme.text;
+    in property <length> font-size: 16px;
+    in property <TextVerticalAlignment> vertical-alignment: TextVerticalAlignment.center;
     // Icons keep their size in layouts; text beside them takes the spare room.
     horizontal-stretch: 0;
     vertical-stretch: 0;
-    accessible-role: none;
+    min-width: glyph-text.min-width;
+    min-height: glyph-text.min-height;
+    preferred-width: glyph-text.preferred-width;
+    preferred-height: glyph-text.preferred-height;
+
+    glyph-text := Text {
+        width: 100%;
+        height: 100%;
+        text: root.glyph;
+        font-family: Theme.icon-font;
+        font-size: root.font-size;
+        color: root.color;
+        horizontal-alignment: center;
+        vertical-alignment: root.vertical-alignment;
+        accessible-role: none;
+    }
 }
 
 export enum ButtonKind { primary, secondary, subtle, danger }
@@ -95,11 +111,13 @@ export component AppButton inherits Rectangle {
             color: root.ink;
             font-size: 14px;
         }
+        // The button itself carries the name; screen readers needn't read it twice.
         if root.text != "": Text {
             text: root.text;
             color: root.ink;
             font-weight: root.primary ? 600 : 400;
             vertical-alignment: center;
+            accessible-role: none;
         }
     }
 
@@ -151,6 +169,7 @@ export component LinkButton inherits Rectangle {
             text: root.text;
             color: touch.has-hover ? Theme.accent-hover : Theme.accent;
             vertical-alignment: center;
+            accessible-role: none;
         }
         FontIcon {
             glyph: Icons.open-link;
@@ -247,6 +266,9 @@ export component Segmented inherits Rectangle {
     border-color: Theme.border;
     accessible-role: radio-group;
     accessible-label: root.label;
+    // Screen readers put focus on the selected option, not on the group.
+    accessible-delegate-focus: root.selected;
+    forward-focus: focus;
 
     function choose(index: int) {
         if (index >= 0 && index < root.options.length && index != root.selected) {
@@ -293,6 +315,7 @@ export component Segmented inherits Rectangle {
                 font-weight: index == root.selected ? 600 : 400;
                 horizontal-alignment: center;
                 vertical-alignment: center;
+                accessible-role: none;
             }
             option-touch := TouchArea {
                 mouse-cursor: MouseCursor.pointer;
@@ -351,10 +374,11 @@ export component InlineMessage inherits Rectangle {
 }
 
 // A static placeholder block shown while content loads (no shimmer: nothing animates idle).
+// Screen readers skip it: a plain Rectangle isn't exposed (see FontIcon for why it doesn't set
+// `accessible-role: none`).
 export component Skeleton inherits Rectangle {
     background: Theme.hover;
     border-radius: 6px;
-    accessible-role: none;
 }
 
 // A text-only button in the accent colour, for "More", "Undo" and similar.
@@ -540,6 +564,7 @@ export component ToggleChip inherits Rectangle {
     accessible-action-default => {
         root.toggled();
     }
+    forward-focus: focus;
 
     focus := FocusScope {
         focus-on-click: false;

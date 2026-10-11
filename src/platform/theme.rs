@@ -54,10 +54,12 @@ pub const DARK_BACKGROUND: Rgb = Rgb::new(0x0f, 0x11, 0x15);
 pub const LIGHT_BACKGROUND: Rgb = Rgb::new(0xf3, 0xf4, 0xf7);
 pub const DARK_TEXT: Rgb = Rgb::new(0xf2, 0xf4, 0xf8);
 pub const LIGHT_TEXT: Rgb = Rgb::new(0x14, 0x17, 0x1f);
-/// The surface the accent must stand out from: the lightest dark surface and the darkest
-/// light one (tiles and inputs).
-const DARK_RAISED: Rgb = Rgb::new(0x1f, 0x24, 0x30);
-const LIGHT_RAISED: Rgb = Rgb::new(0xf3, 0xf4, 0xf7);
+/// The surface the accent must stand out from as link text: the lightest dark surface and the
+/// darkest light one. Both are the title card's veil (`backdrop-veil` in ui/theme.slint) over
+/// the worst backdrop pixel, white under the dark veil and black under the light one. The tests
+/// check these against the theme file.
+const DARK_WORST_SURFACE: Rgb = Rgb::new(0x38, 0x3a, 0x40);
+const LIGHT_WORST_SURFACE: Rgb = Rgb::new(0xe6, 0xe6, 0xe6);
 const ON_DARK_ACCENT: Rgb = Rgb::new(0x0b, 0x0d, 0x12);
 const ON_LIGHT_ACCENT: Rgb = Rgb::new(0xff, 0xff, 0xff);
 const DARK_FALLBACK_ACCENT: Rgb = Rgb::new(0x6e, 0xa8, 0xfe);
@@ -102,9 +104,9 @@ pub fn accent_palette() -> Option<[Rgb; 8]> {
 /// neighbouring shades, keeping the first with AA contrast both ways. Falls back to blue.
 pub fn pick_accent(palette: Option<[Rgb; 8]>, dark: bool) -> Accent {
     let (surface, on_fill, fallback, order) = if dark {
-        (DARK_RAISED, ON_DARK_ACCENT, DARK_FALLBACK_ACCENT, [1, 2, 0])
+        (DARK_WORST_SURFACE, ON_DARK_ACCENT, DARK_FALLBACK_ACCENT, [1, 2, 0])
     } else {
-        (LIGHT_RAISED, ON_LIGHT_ACCENT, LIGHT_FALLBACK_ACCENT, [4, 5, 3])
+        (LIGHT_WORST_SURFACE, ON_LIGHT_ACCENT, LIGHT_FALLBACK_ACCENT, [4, 5, 3])
     };
     if let Some(palette) = palette {
         for index in order {
@@ -169,6 +171,8 @@ pub fn style_title_bar(hwnd: isize, dark: bool) {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
 
     #[test]
@@ -181,19 +185,130 @@ mod tests {
         assert!((contrast(Rgb::new(0x76, 0x76, 0x76), white) - 4.54).abs() < 0.02);
     }
 
-    #[test]
-    fn design_tokens_meet_aa() {
-        let dark_muted = Rgb::new(0xa3, 0xaa, 0xb8);
-        assert!(contrast(DARK_TEXT, DARK_BACKGROUND) >= 7.0);
-        assert!(contrast(dark_muted, DARK_RAISED) >= 4.5);
-        let light_muted = Rgb::new(0x4d, 0x55, 0x66);
-        assert!(contrast(LIGHT_TEXT, LIGHT_BACKGROUND) >= 7.0);
-        assert!(contrast(light_muted, LIGHT_BACKGROUND) >= 4.5);
-        for dark in [true, false] {
-            let accent = pick_accent(None, dark);
-            assert!(!accent.from_system);
-            assert!(contrast(accent.on_fill, accent.fill) >= 4.5);
+    /// The colour tokens in ui/theme.slint as (dark, light) RGBA pairs. Tokens computed in
+    /// Slint (`accent-subtle`, `accent-hover`) aren't listed; the test rebuilds them.
+    fn theme_tokens() -> HashMap<String, ([u8; 4], [u8; 4])> {
+        fn hex(value: &str) -> Option<[u8; 4]> {
+            let digits = value.trim().strip_prefix('#')?;
+            let byte = |i: usize| -> Option<u8> { u8::from_str_radix(digits.get(i..i + 2)?, 16).ok() };
+            match digits.len() {
+                6 => Some([byte(0)?, byte(2)?, byte(4)?, 255]),
+                8 => Some([byte(0)?, byte(2)?, byte(4)?, byte(6)?]),
+                _ => None,
+            }
         }
+        let mut tokens = HashMap::new();
+        for line in include_str!("../../ui/theme.slint").lines() {
+            let Some((_, declaration)) = line.split_once("property <color> ") else {
+                continue;
+            };
+            let Some((name, value)) = declaration.split_once(':') else {
+                continue;
+            };
+            let value = value.trim().trim_end_matches(';');
+            let (dark, light) = value
+                .strip_prefix("dark ? ")
+                .and_then(|pair| pair.split_once(" : "))
+                .unwrap_or((value, value));
+            if let (Some(dark), Some(light)) = (hex(dark), hex(light)) {
+                tokens.insert(name.trim().to_string(), (dark, light));
+            }
+        }
+        tokens
+    }
+
+    /// `top` drawn over `bottom` at `top`'s alpha.
+    fn over(top: [u8; 4], bottom: Rgb) -> Rgb {
+        let alpha = f64::from(top[3]) / 255.0;
+        let mix = |t: u8, b: u8| (f64::from(t) * alpha + f64::from(b) * (1.0 - alpha)).round() as u8;
+        Rgb::new(mix(top[0], bottom.r), mix(top[1], bottom.g), mix(top[2], bottom.b))
+    }
+
+    fn opaque(color: [u8; 4]) -> Rgb {
+        assert_eq!(color[3], 255, "expected an opaque colour");
+        Rgb::new(color[0], color[1], color[2])
+    }
+
+    /// WCAG AA in both themes: 4.5:1 for text, 3:1 for icons and focus rings (WCAG 1.4.11),
+    /// on every surface each colour is drawn on. Disabled controls are exempt.
+    #[test]
+    fn theme_meets_wcag_aa() {
+        let tokens = theme_tokens();
+        let mut failures = Vec::new();
+        for dark in [true, false] {
+            let theme = if dark { "dark" } else { "light" };
+            let token = |name: &str| {
+                let (dark_value, light_value) = tokens[name];
+                if dark { dark_value } else { light_value }
+            };
+            let solid = |name: &str| (name.to_string(), opaque(token(name)));
+            let accent = pick_accent(None, dark);
+            let mut accent_rgba = [accent.fill.r, accent.fill.g, accent.fill.b, 255];
+
+            // The title card's veil over its worst backdrop pixel, as pick_accent assumes.
+            let veil = over(
+                token("backdrop-veil"),
+                if dark { Rgb::new(255, 255, 255) } else { Rgb::new(0, 0, 0) },
+            );
+            let worst = if dark { DARK_WORST_SURFACE } else { LIGHT_WORST_SURFACE };
+            assert_eq!(veil, worst, "{theme}: the worst-case surface constant is out of date");
+
+            let mut surfaces: Vec<(String, Rgb)> =
+                ["background", "surface", "raised", "hover", "pressed"].map(solid).to_vec();
+            surfaces.push(("veil".into(), veil));
+            // `accent-subtle` marks pills and chips on the card, active filters on the page,
+            // checked chips in popups and selected service tiles. Hover and pressed replace it
+            // rather than layer on it.
+            accent_rgba[3] = if dark { 36 } else { 31 };
+            let subtle: Vec<(String, Rgb)> = [solid("background"), solid("surface"), ("veil".into(), veil)]
+                .iter()
+                .map(|(name, color)| (format!("accent-subtle on {name}"), over(accent_rgba, *color)))
+                .collect();
+            let mut check = |name: &str, color: Rgb, backgrounds: &[(String, Rgb)], minimum: f64| {
+                for (background, under) in backgrounds {
+                    let ratio = contrast(color, *under);
+                    if ratio < minimum {
+                        failures.push(format!("{theme}: {name} on {background} is {ratio:.2}:1, below {minimum}:1"));
+                    }
+                }
+            };
+
+            let messages = ["danger-subtle", "warning-subtle"].map(solid);
+            let text = opaque(token("text"));
+            let muted = opaque(token("text-muted"));
+            check("text", text, &surfaces, 4.5);
+            check("text", text, &subtle, 4.5);
+            check("text", text, &messages, 4.5);
+            check("text-muted", muted, &surfaces, 4.5);
+            check("text-muted", muted, &messages, 4.5);
+            // Muted chevrons on active filter buttons.
+            check("text-muted icon", muted, &subtle, 3.0);
+            // Danger buttons label in red on ordinary surfaces.
+            check("danger", opaque(token("danger")), &surfaces, 4.5);
+            // Links, "More" and "Undo" are accent-coloured text.
+            check("accent", accent.fill, &surfaces, 4.5);
+            check("on-accent", accent.on_fill, &[("accent".into(), accent.fill)], 4.5);
+            // Icons and focus rings.
+            check("accent icon", accent.fill, &surfaces, 3.0);
+            check("accent icon", accent.fill, &subtle, 3.0);
+            for name in ["star", "success"] {
+                check(name, opaque(token(name)), &surfaces, 3.0);
+            }
+            check("danger icon", opaque(token("danger")), &[solid("danger-subtle")], 3.0);
+            check("warning icon", opaque(token("warning")), &[solid("warning-subtle")], 3.0);
+        }
+        assert!(failures.is_empty(), "contrast below WCAG AA:\n{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn rust_colours_match_the_theme_file() {
+        let tokens = theme_tokens();
+        let pair = |name: &str| (opaque(tokens[name].0), opaque(tokens[name].1));
+        assert_eq!(pair("background"), (DARK_BACKGROUND, LIGHT_BACKGROUND));
+        assert_eq!(pair("text"), (DARK_TEXT, LIGHT_TEXT));
+        // The theme file's defaults are what Slint shows before Rust sets the accent.
+        assert_eq!(pair("accent").0, DARK_FALLBACK_ACCENT);
+        assert_eq!(pair("on-accent").0, ON_DARK_ACCENT);
     }
 
     #[test]

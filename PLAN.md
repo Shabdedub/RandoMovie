@@ -81,6 +81,7 @@ src/
 examples/smoke.rs               prints one AU pick and one AU search result from the live APIs
 tests/fixtures/*.json           recorded TMDB responses (no credentials inside)
 tests/live.rs                   #[ignore]d live checks against TMDB and IMDb
+vendor/parley/                  parley 0.11.1 with rule-based line breaking (phase 5, see RANDOMOVIE-PATCH.md)
 ```
 
 ## Threads and data flow
@@ -188,6 +189,12 @@ The HWND comes from winit's own `raw_window_handle` re-export, so no separate cr
 The release profile adds `panic = "abort"` to the four required settings. Unwinding tables made
 up about 4.4 MB of the exe; the panic hook still writes the panic to the log before exiting.
 
+`[patch.crates-io]` replaces parley 0.11.1, the text layout crate Slint uses, with
+`vendor/parley` (phase 5). It is the same release except that it always uses ICU4X's
+rule-based line breaking. Slint 1.18.1 forces parley's `complex-scripts` feature, which links
+3.6 MB of line-break dictionaries, and has no setting to drop them. `RANDOMOVIE-PATCH.md` in
+that folder explains the change and how to update or remove the copy.
+
 Not used on purpose: no `chrono` (std time plus a small formatter), no `thiserror` or `anyhow`
 (small manual error enums), no `log` facade (one file logger), no `futures` (tokio covers it),
 no `tempfile` (tests use unique folders under the system temp dir).
@@ -284,13 +291,52 @@ no `tempfile` (tests use unique folders under the system temp dir).
   shows, after the worker has the region's services, so "Included with" never names the
   wrong ones.
 
+## Polish decisions (phase 5)
+
+- **No unnamed nodes for screen readers.** Slint leaves an element out of the accessibility
+  tree only when that element itself sets `accessible-role: none`. When a component's root sets
+  it, every instance still appears as an unnamed node, which UI Automation lists as "Custom".
+  The icon widget is therefore a plain component whose glyph `Text` carries `none`, and
+  `Skeleton` sets nothing, since a `Rectangle` isn't exposed anyway. Buttons, links, choice rows
+  and the navigation rail hide their visible label `Text`, because the control already carries
+  the name. Every page and panel was checked with UI Automation afterwards.
+- **Focus goes where it's useful.** Choice rows hand screen-reader focus to the selected option
+  (`accessible-delegate-focus`). Each filter panel sets `forward-focus` on its `PopupWindow`,
+  which Slint applies when the popup opens, after it has noted the focus to restore on close.
+  Focus therefore moves to the panel's first control and returns to the filter button
+  afterwards. "Any genre" became a fixed first chip because focus can't be forwarded into a
+  repeated element.
+- **Arrow keys.** Up and Down move focus through the navigation rail. In the services grid,
+  Left and Right follow reading order, Up and Down keep the column, and the focused tile
+  scrolls into view. The grid's scroll view overhangs its slot by 4 px on every side, with the
+  tiles inset by the same amount, so focus rings aren't clipped and the tiles still line up
+  with the controls above.
+- **Contrast is tested.** A unit test in `platform::theme` parses `ui/theme.slint` and checks
+  every text colour against 4.5:1, and every icon and focus-ring colour against 3:1, on each
+  surface it is drawn on in both themes. That includes composites: the title card's veil over
+  a white or black backdrop pixel, and `accent-subtle` over its surfaces. The audit found two
+  failures, both in the light theme over a dark backdrop: links on the card at 4.19:1 and the
+  IMDb star at 2.86:1. The light veil went from 86 % to 90 %, which lifts them to 4.65:1 and
+  3.17:1. The Windows accent is now checked against the same worst-case surface.
+- **Error states.** Every failure offers a way out. On Search, "This title didn't load" gained
+  Try again. When the selected services yield nothing, Pick's message says that stores which
+  only rent or sell don't count. An empty search suggests checking the spelling or using fewer
+  words. Problems show a muted icon on both pages; prompts keep the accent.
+- **Hand-edited settings.** A UTF-8 byte-order mark no longer makes `settings.json` unreadable,
+  and IMDb minimums or maximum lengths between the filter bar's steps snap to the step shown.
+- **Exe size.** The 3.6 MB of ICU4X line-break dictionaries went with the patched parley
+  above, which took the exe from 16.85 MB to 13.17 MB. PERFORMANCE.md has the sections before
+  and after.
+
 ## Testing
 
 - Unit tests on the recorded fixtures cover: the eligibility rule and chip grouping, variant
   grouping on the real AU provider list, random index to page/offset maths (500-page cap, short
   last page), IMDb index build and lookup (7- and 8-digit ids, multi-run merge, gzip input),
   cache expiry and image LRU eviction, settings migration, genre mapping, and the pick loop
-  against a fake catalog with a seeded RNG.
+  against a fake catalog with a seeded RNG. Phase 5 added the theme's WCAG contrast against
+  `ui/theme.slint`, settings with a byte-order mark, and hand-edited filter values snapping to
+  the filter bar's steps.
 - `tests/live.rs` holds `#[ignore]`d live tests using `TMDB_TOKEN` from `.env`, including the
   acceptance checks for single-service picks, free-only picks and search speed.
 - Every phase ends with a release build, `cargo clippy --all-targets -- -D warnings`, `cargo test`,

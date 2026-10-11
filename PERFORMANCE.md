@@ -1,18 +1,96 @@
 # Performance
 
 Measurements are taken on release builds. This file grows with each phase, newest first: the
-UI shell is measured from phase 2, and phase 5 repeats every budget. Sizes use binary units, as
-Windows Explorer shows them: 1 MB is 1,048,576 bytes.
+UI shell is measured from phase 2, and phase 5 repeats every budget on the final build. Sizes
+use binary units, as Windows Explorer shows them: 1 MB is 1,048,576 bytes.
 
 ## Budgets from the spec
 
-| Budget | Target | Status |
+All budgets are met by the final build (0.5.0, phase 5).
+
+| Budget | Target | Final result |
 |---|---|---|
-| Idle CPU | 0 % | 0 ms of CPU in 60 s with a pick on screen, and with search results on screen (phase 4) |
-| Private working set after about 20 titles | under 50 MB | 27 MB private bytes after 30 picks; 23 MB after a further 59 search results and 6 opened titles (phase 4) |
-| Window interactive after launch | within 0.5 s | Visible after 120 to 140 ms (phase 2); first frame 69 to 84 ms after launch in phase 4's four runs |
-| `RandoMovie.exe` size | under 15 MB | **16.85 MB, over by 1.85 MB.** Phase 5 trims it; see "Exe size" under phases 3 and 4 |
-| IMDb rebuild peak memory | "modest" | About 2 MB extra, see below |
+| Idle CPU | 0 % | 0 ms of CPU in 60 s, across all threads, with a pick on screen and with search results on screen |
+| Private working set after about 20 titles | under 50 MB | 22.3 MB private bytes after 30 picks; 22.7 MB after a series of searches and opened titles more |
+| Window interactive after launch | within 0.5 s | Visible 43 to 51 ms after launch; first frame 59 to 63 ms after `main` starts |
+| `RandoMovie.exe` size | under 15 MB | 13.17 MB (13,811,712 bytes) |
+| IMDb rebuild peak memory | "modest" | About 2 MB extra (phase 1) |
+
+## Phase 5: final measurements
+
+Measured on 2026-10-11 with the final release build (0.5.0) on the development machine
+described under phase 2, region AU. Each acceptance profile started with the IMDb index in
+place and an empty cache. UI Automation drove the app and read each card and row from the
+accessibility tree; the app's log timed each step.
+
+| Measurement | Result |
+|---|---|
+| Launch to visible window, measured from outside (`EnumWindows` every 2 ms) | 43 and 44 ms; 51 ms for a second copy of the exe |
+| Window created / first frame, from the app's log (from `main`) | 55 to 58 ms / 59 to 63 ms (three launches) |
+| Private bytes 3 s after launch, Pick page | 13.8 to 14.0 MB |
+| 30 Netflix-only picks, 2.5 s between clicks | 30 of 30 from the prepared pick; click to card on screen 7 to 14 ms, median 8, poster included |
+| 20 free-only picks, 2.5 s between clicks | 20 of 20 from the prepared pick; 7 to 14 ms |
+| Idle 60 s with a pick on screen, all 9 threads | 0 ms of CPU; private bytes 22.3 MB after the 30 picks, working set 48 MB |
+| Search, typing to the first row's IMDb rating and AU verdict, cold cache | 732 to 1,188 ms over five queries, including the 300 ms pause (table below) |
+| Idle 60 s with search results on screen | 0 ms of CPU; private bytes 22.7 MB after the 30 picks, the searches below and others, and several opened titles |
+| `RandoMovie.exe` | 13.17 MB (13,811,712 bytes), version info 0.5.0 |
+
+| Query (cold cache) | Search sent to results | To the first rating and verdict | Typing to rating and verdict |
+|---|---|---|---|
+| The Matrix (Netflix profile) | 649 ms | 857 ms | 1,188 ms |
+| The Matrix (free-titles profile) | 149 ms | 299 ms | 732 ms |
+| Inception | 302 ms | 546 ms | 934 ms |
+| Paddington 2 | 243 ms | 497 ms | 819 ms |
+| Dune: Part Two, after 70 s idle | 245 ms | 559 ms | 885 ms |
+
+The slow Matrix search was a slow TMDB response, not a cold connection: the query after 70
+seconds of idle, when the keep-alive connection could have closed, took the usual 245 ms.
+
+### First launch of a new exe
+
+The first launch right after building took 2.4 s to show the window, while the app's log put
+its first frame 63 ms after `main`. A fresh copy of the same exe showed where the time goes:
+`Process.Start` returned after 1,048 ms because Windows checks a new, unsigned executable once
+before creating its process. The window was visible 64 ms after the process existed, and the
+copy's second launch took 51 ms in all. Signing the exe is the usual way to shorten that check;
+nothing inside the app can.
+
+### Exe size
+
+The final exe is 13.17 MB, down 3.68 MB from phase 4's 16.85 MB and 1.83 MB under budget.
+
+Nearly all of the saving came from one source. Phase 4's exe held 5.06 MB of read-only data,
+and 3.6 MB of it were ICU4X's line-break dictionaries (1.9 MB for Thai, Lao, Khmer and
+Burmese, 1.7 MB for Chinese and Japanese). They come from parley, Slint's text layout crate:
+Slint 1.18.1 always turns on parley's `complex-scripts` feature, which switches parley to
+ICU4X's dictionary-based segmenters, and no Slint feature turns it off. The project now builds
+parley 0.11.1 from `vendor/parley`, an unmodified copy except that it always uses ICU4X's
+rule-based segmenters (`vendor/parley/RANDOMOVIE-PATCH.md`). Text in those scripts still
+renders and wraps by the Unicode rules: Chinese and Japanese break between characters as
+before, while Thai, Lao, Khmer and Burmese wrap only at spaces. RandoMovie asks TMDB for
+English text, so this rarely shows.
+
+| Section | Phase 4 | Phase 5 |
+|---|---|---|
+| Code (`.text`) | 11.51 MB | 11.44 MB |
+| Read-only data (`.rdata`) | 5.06 MB | 1.45 MB |
+| Everything else (unwind info, data, resources, relocations) | 0.28 MB | 0.28 MB |
+
+Code shrank by 73 KB, 69 KB of it when the icon widget stopped inheriting from `Text`: icon
+instances no longer carry the accessibility properties a `Text` gets. The per-package `opt-level = "s"`
+idea from phase 3 wasn't needed and wasn't adopted, so every crate keeps the required
+`opt-level = 3`.
+
+### Method
+
+- **Startup.** As in phase 2: a script starts the exe and polls `EnumWindows` every 2 ms for a
+  visible window from the process, three launches in a row, then reads the app's log lines.
+- **Picks, idle and memory.** As in phase 3: UI Automation presses "Pick again", waits for the
+  new card, checks its groups, and pauses 2.5 s. After the run, the idle script records every
+  thread's `TotalProcessorTime` and the process's private bytes, waits 60 s, and reads them
+  again.
+- **Search.** As in phase 4: UI Automation sets the search box's text and polls until the
+  expected row shows its rating and verdict. Each query was new to the profile's cache.
 
 ## Phase 4: Search
 

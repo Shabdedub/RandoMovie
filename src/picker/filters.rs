@@ -74,6 +74,14 @@ pub fn runtime_index(value: Option<u16>) -> usize {
     }
 }
 
+/// Moves minimums and maximums typed into settings.json onto the filter bar's steps, so the bar
+/// shows exactly the filter that applies.
+pub fn snap_to_steps(filters: &mut Filters) {
+    filters.min_imdb_rating = RATINGS[rating_index(filters.min_imdb_rating)].0;
+    filters.min_imdb_votes = VOTES[votes_index(filters.min_imdb_votes)].0;
+    filters.max_runtime = RUNTIMES[runtime_index(filters.max_runtime)].0;
+}
+
 /// A year typed into a year box: empty means "Any"; anything else must be a plausible year.
 pub fn parse_year(text: &str) -> Option<u16> {
     let year: u16 = text.trim().parse().ok()?;
@@ -198,6 +206,25 @@ mod tests {
         assert_eq!(runtime_index(Some(120)), 3);
         assert_eq!(runtime_index(Some(110)), 3, "never stricter than saved");
         assert_eq!(runtime_index(Some(240)), 5);
+    }
+
+    #[test]
+    fn hand_edited_values_snap_to_the_steps_shown() {
+        let mut f = Filters {
+            min_imdb_rating: Some(6.7),
+            min_imdb_votes: Some(7_000),
+            max_runtime: Some(110),
+            ..Filters::default()
+        };
+        snap_to_steps(&mut f);
+        assert_eq!((f.min_imdb_rating, f.min_imdb_votes, f.max_runtime), (Some(6.5), Some(5_000), Some(120)));
+        let mut any = Filters {
+            min_imdb_rating: None,
+            min_imdb_votes: None,
+            ..Filters::default()
+        };
+        snap_to_steps(&mut any);
+        assert_eq!((any.min_imdb_rating, any.min_imdb_votes, any.max_runtime), (None, None, None));
     }
 
     #[test]

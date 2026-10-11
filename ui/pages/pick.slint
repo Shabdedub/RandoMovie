@@ -52,24 +52,17 @@ component FilterBar inherits FlexboxLayout {
         clicked => {
             genre-popup.show();
         }
+        // Opening a panel puts keyboard focus on its first control; Esc closes it and focus
+        // returns to the filter button.
         genre-popup := PopupWindow {
             x: 0;
             y: parent.height + 6px;
             width: 460px;
             close-policy: PopupClosePolicy.close-on-click-outside;
+            forward-focus: any-genre;
             FilterPanel {
-                HorizontalLayout {
-                    PanelTitle {
-                        text: "Genres";
-                        horizontal-stretch: 1;
-                    }
-                    if PickState.genre-summary != "Any genre": TextButton {
-                        text: "Any genre";
-                        accessible-text: "Clear the genre filter";
-                        clicked => {
-                            PickState.genres-cleared();
-                        }
-                    }
+                PanelTitle {
+                    text: "Genres";
                 }
                 PanelNote {
                     text: "Picks match any genre you choose. Some genres exist only for movies or only for series.";
@@ -79,6 +72,13 @@ component FilterBar inherits FlexboxLayout {
                 }
                 FlexboxLayout {
                     spacing: 8px;
+                    any-genre := ToggleChip {
+                        text: "Any genre";
+                        checked: PickState.genre-summary == "Any genre";
+                        toggled => {
+                            PickState.genres-cleared();
+                        }
+                    }
                     for genre[index] in PickState.genres: ToggleChip {
                         text: genre.name;
                         checked: genre.selected;
@@ -104,11 +104,12 @@ component FilterBar inherits FlexboxLayout {
             y: parent.height + 6px;
             width: 440px;
             close-policy: PopupClosePolicy.close-on-click-outside;
+            forward-focus: rating-choice;
             FilterPanel {
                 PanelTitle {
                     text: "Minimum IMDb rating";
                 }
-                Segmented {
+                rating-choice := Segmented {
                     label: "Minimum IMDb rating";
                     options: PickState.rating-options;
                     selected <=> PickState.rating-index;
@@ -147,6 +148,7 @@ component FilterBar inherits FlexboxLayout {
             y: parent.height + 6px;
             width: 360px;
             close-policy: PopupClosePolicy.close-on-click-outside;
+            forward-focus: from-year;
             FilterPanel {
                 HorizontalLayout {
                     PanelTitle {
@@ -163,7 +165,7 @@ component FilterBar inherits FlexboxLayout {
                 }
                 HorizontalLayout {
                     spacing: 8px;
-                    LineEdit {
+                    from-year := LineEdit {
                         horizontal-stretch: 1;
                         placeholder-text: "From";
                         input-type: InputType.number;
@@ -223,11 +225,12 @@ component FilterBar inherits FlexboxLayout {
             y: parent.height + 6px;
             width: 420px;
             close-policy: PopupClosePolicy.close-on-click-outside;
+            forward-focus: runtime-choice;
             FilterPanel {
                 PanelTitle {
                     text: "Maximum length";
                 }
-                Segmented {
+                runtime-choice := Segmented {
                     label: "Maximum length";
                     options: PickState.runtime-options;
                     selected <=> PickState.runtime-index;

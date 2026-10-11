@@ -17,8 +17,9 @@ export global Theme {
     out property <color> border: dark ? #2a3040 : #dde1e8;
     out property <color> border-strong: dark ? #3b4356 : #c3c9d4;
     out property <color> scrim: dark ? #000000a6 : #0f111566;
-    // Over the blurred backdrop; strong enough that muted text keeps 4.5:1 even over white.
-    out property <color> backdrop-veil: dark ? #171a21db : #ffffffdb;
+    // Over the blurred backdrop; strong enough that muted text and accent links keep 4.5:1
+    // over any image (src/platform/theme.rs tests every text colour on it).
+    out property <color> backdrop-veil: dark ? #171a21db : #ffffffe6;
 
     // Text (all at least 4.5:1 on every surface)
     out property <color> text: dark ? #f2f4f8 : #14171f;

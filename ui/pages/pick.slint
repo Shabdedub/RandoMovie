@@ -411,8 +411,8 @@ export component PickPage inherits Rectangle {
                 poster: PickState.poster;
                 backdrop: PickState.backdrop;
                 serial: PickState.card-serial;
-                open-link => {
-                    PickState.open-where-to-watch();
+                open-service(group, chip) => {
+                    PickState.open-service(group, chip);
                 }
             }
 

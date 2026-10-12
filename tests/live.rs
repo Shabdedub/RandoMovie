@@ -29,6 +29,7 @@ use randomovie::services::{ServiceCatalog, ServiceSelection};
 use randomovie::store::{Settings, Store};
 use randomovie::tmdb::{Credential, Freshness, TmdbClient};
 use randomovie::util::time::{DAY, now_unix};
+use randomovie::watch_links;
 
 const REGION: &str = "AU";
 
@@ -319,6 +320,24 @@ fn token_is_validated() {
         )
         .unwrap();
         assert_eq!(bad.validate().await, Err(ApiError::Unauthorized));
+    });
+}
+
+#[test]
+#[ignore = "live: needs the network"]
+fn service_buttons_find_exact_pages_on_wikidata() {
+    let http = randomovie::tmdb::build_http_client().unwrap();
+    runtime().block_on(async {
+        // The Matrix is on Netflix and in Apple TV; Ted Lasso is an Apple TV show.
+        let matrix = watch_links::fetch_service_ids(&http, "tt0133093").await.unwrap();
+        assert_eq!(matrix.netflix.as_deref(), Some("20557937"));
+        let url = watch_links::button_url(8, MediaType::Movie, Some(&matrix), "The Matrix", "AU", None);
+        assert_eq!(url.as_deref(), Some("https://www.netflix.com/title/20557937"));
+        let ted = watch_links::fetch_service_ids(&http, "tt10986410").await.unwrap();
+        assert!(ted.apple_show.as_deref().is_some_and(|id| id.starts_with("umc.cmc.")));
+        // An IMDb id no item has gives no ids, not an error.
+        let none = watch_links::fetch_service_ids(&http, "tt99999999999").await.unwrap();
+        assert_eq!(none, watch_links::ServiceIds::default());
     });
 }
 

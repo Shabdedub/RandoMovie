@@ -49,6 +49,8 @@ pub struct TitleCard {
     pub region_name: String,
     pub poster_path: Option<String>,
     pub backdrop_path: Option<String>,
+    /// For the service buttons' exact links (see `watch_links`).
+    pub imdb_id: Option<String>,
     /// When the availability was fetched (unix seconds).
     pub fetched_at: i64,
 }
@@ -80,6 +82,7 @@ pub fn build(
         region_name: region_name.to_owned(),
         poster_path: details.poster_path.clone(),
         backdrop_path: details.backdrop_path.clone(),
+        imdb_id: details.imdb_id.clone(),
         fetched_at: details.fetched_at,
     }
 }

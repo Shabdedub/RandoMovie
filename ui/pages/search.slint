@@ -458,8 +458,8 @@ export component SearchPage inherits Rectangle {
                             poster: SearchState.poster;
                             backdrop: SearchState.backdrop;
                             serial: SearchState.card-serial;
-                            open-link => {
-                                SearchState.open-where-to-watch();
+                            open-service(group, chip) => {
+                                SearchState.open-service(group, chip);
                             }
                         }
                     }

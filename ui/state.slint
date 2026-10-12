@@ -86,10 +86,12 @@ export struct GenreOption {
     selected: bool,
 }
 
-// One service under "Where to watch".
+// One service under "Where to watch", a button. `opens-service`: it opens the service's own
+// page or search for the title; otherwise TMDB's watch page, which links to the service.
 export struct WatchChip {
     name: string,
     logo: image,
+    opens-service: bool,
 }
 
 // `kind`: 0 on your services, 1 free, 2 other subscriptions, 3 rent or buy.
@@ -114,7 +116,6 @@ export struct TitleCardData {
     // 0 on your services, 1 free, 2 not on your services, 3 not streaming in the region
     verdict-state: int,
     region-name: string,
-    link: string,
 }
 
 export global PickState {
@@ -174,7 +175,8 @@ export global PickState {
     callback runtime-selected(int);
     callback reset-filters();
     callback run-error-action();
-    callback open-where-to-watch();
+    // A service button under "Where to watch": group and button index.
+    callback open-service(int, int);
     // The card's size and its poster's, in logical pixels, whenever they change.
     callback card-resized(length, length, length, length);
 }
@@ -230,7 +232,8 @@ export global SearchState {
     callback close-card();
     callback load-more();
     callback retry();
-    callback open-where-to-watch();
+    // A service button under "Where to watch": group and button index.
+    callback open-service(int, int);
     callback card-resized(length, length, length, length);
 }
 
@@ -294,7 +297,8 @@ export global LibraryState {
     callback move-open();
     callback undo();
     callback close-card();
-    callback open-where-to-watch();
+    // A service button under "Where to watch": group and button index.
+    callback open-service(int, int);
     callback card-resized(length, length, length, length);
 }
 

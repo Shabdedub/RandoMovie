@@ -19,12 +19,13 @@ non-commercial use.
 | 4 | Search and the shared title card | Done |
 | 5 | Polish, accessibility, performance measurement, final README | Done |
 | After 5 | The Library: what you marked as watched or not interested (0.6.0), with type and genre filters (0.7.0) | Done |
+| After 5 | Service buttons on the title card that open the title on each service (0.8.0) | Done |
 
 Every screen works: first run, Pick, Search, Library, My Services, Settings and About. Phase 5's
 build (0.5.0) met every budget in the spec: 0 % CPU at idle, about 22 MB of private memory after
-30 titles, and a window on screen about 50 ms after launch. With the Library and its filters
-(0.7.0) the exe is 13.77 MB, still under the 15 MB budget. PERFORMANCE.md has the measurements
-and how they were taken.
+30 titles, and a window on screen about 50 ms after launch. With everything since (0.8.0) the exe
+is 13.80 MB, still under the 15 MB budget. PERFORMANCE.md has the measurements and how they were
+taken.
 
 ## Prerequisites
 
@@ -87,7 +88,9 @@ floor, clear the cache, refresh the IMDb ratings, and change or remove the token
 - **The title card** shows the poster, title, year, Movie or Series badge, runtime or seasons,
   genres, the IMDb rating and votes, and a three-line overview with **More**. "Where to watch
   in {region}" gives the verdict, then the services grouped as On your services, Free, Other
-  subscriptions and Rent or buy (collapsed). **Open where to watch** opens TMDB's watch page.
+  subscriptions and Rent or buy (collapsed). **Each service is a button** that opens the title
+  on that service in your browser: the title's own page on Netflix, Disney+ and Apple TV, the
+  service's search for the title on others, or TMDB's watch page when there's no better link.
 - **The filter bar** has Movies / Series / Both, genres, the minimum IMDb rating and votes,
   the year range, and the maximum length for movies. **Reset filters** appears once anything
   differs from the defaults.
@@ -240,7 +243,23 @@ The spec left these points open. Each choice favours fast, light and predictable
   in the light one. The veil keeps muted text and accent links above 4.5:1 over any image. A
   title without a backdrop shows the plain card.
 - **Attribution on the card.** "Streaming data: JustWatch via TMDB" sits under the "Where to
-  watch" heading, with "Open where to watch" beside it, so both stay in view.
+  watch" heading, beside the availability it credits.
+- **Service buttons.** TMDB names the services that have a title but gives no links into
+  them, so each button opens the best link the app can make:
+  - **The title's own page** on Netflix, Disney+ and Apple TV (Apple TV+ and the Apple TV
+    Store), using the ids Wikidata records for the title. When a card with one of those
+    services shows, the app looks its IMDb id up on Wikidata in the background (2 to 3 s) and
+    keeps the answer for 30 days, so a press opens at once.
+  - **The service's search for the title** on Netflix and Apple TV when Wikidata has no id,
+    and on Prime Video and Amazon Video, BINGE, SBS On Demand, ABC iview, Tubi, YouTube and
+    Google Play. Each of these search links was checked to show results for the title.
+  - **TMDB's watch page for the title** for every other service, such as Stan, Paramount+,
+    7plus, 9Now and Foxtel Now, whose search links need a sign-in or ignore the query. That
+    page links to each service that has the title. Its button says "see where to watch".
+  - Wikidata's Prime Video ids are US Amazon store ids, which don't reliably open in
+    Australia, so Prime Video always uses its search.
+- **Testing links without a browser.** With `RANDOMOVIE_NO_BROWSER` set, every link the app
+  would open is written to the log instead.
 - **Failed picks.** The card area explains what happened and offers one way out: Reset
   filters, Choose services, Add token or Try again. "Previous" then returns to the last card.
 - **Ratings and availability in the results.** The spec lists thumbnail, title, year and type
@@ -347,7 +366,8 @@ Each profile started with an empty cache.
 Every one of those 50 picks came from the pick prepared in the background, and each card
 appeared 7 to 14 ms after the click, poster included. PERFORMANCE.md has the details.
 
-The live tests repeat the first three checks at the data level; all 7 pass on the final build:
+The live tests repeat the first three checks at the data level and look up real titles on
+Wikidata for the service buttons; all 8 pass on the current build:
 
 ```powershell
 cargo test --release --test live -- --ignored --test-threads=1 --nocapture
@@ -357,6 +377,8 @@ cargo test --release --test live -- --ignored --test-threads=1 --nocapture
 
 - This product uses the TMDB API but is not endorsed or certified by TMDB.
 - Streaming availability data is provided by JustWatch through TMDB.
+- Links to titles on Netflix, Disney+ and Apple TV use ids from Wikidata (CC0). Looking them
+  up sends the title's IMDb id to Wikidata.
 - Information courtesy of IMDb (<https://www.imdb.com>). Used with permission. IMDb ratings come
   from IMDb's non-commercial datasets, for personal and non-commercial use.
 - The UI is built with Slint under its royalty-free licence; the About screen shows Slint's

@@ -348,8 +348,9 @@ impl Controller {
         }
     }
 
-    pub fn open_where_to_watch(&mut self, _ui: &AppWindow) {
-        self.open_card_link(Surface::Pick);
+    /// A service button on the Pick card.
+    pub fn pick_open_service(&mut self, _ui: &AppWindow, group: i32, chip: i32) {
+        self.open_service(Surface::Pick, group, chip);
     }
 
     /// Tells the worker the poster's physical width, so prepared picks download that size,

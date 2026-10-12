@@ -528,8 +528,9 @@ impl Controller {
         state.set_card_error(SharedString::new());
     }
 
-    pub fn search_open_link(&mut self, _ui: &AppWindow) {
-        self.open_card_link(Surface::Search);
+    /// A service button on an opened result's card.
+    pub fn search_open_service(&mut self, _ui: &AppWindow, group: i32, chip: i32) {
+        self.open_service(Surface::Search, group, chip);
     }
 
     pub fn search_card_resized(&mut self, ui: &AppWindow, width: f32, height: f32, poster_width: f32, poster_height: f32) {

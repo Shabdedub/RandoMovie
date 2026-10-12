@@ -7,12 +7,11 @@ use std::time::Duration;
 
 use randomovie::card::{ImdbBadge, TitleCard};
 use randomovie::picker::{ChipGroupKind, Verdict};
-use randomovie::platform;
-use randomovie::log_warn;
+use randomovie::watch_links;
 use slint::{ComponentHandle, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, Timer, VecModel};
 
 use super::{Controller, logo_key};
-use crate::worker::{CardImageKind, Command, ImageSpec};
+use crate::worker::{CardImageKind, Command, ImageSpec, ServiceLinkRequest};
 use crate::{
     AppState, AppWindow, CardMetrics, LibraryState, Page, PickState, PickStatus, SearchState, Theme,
     TitleCardData, WatchChip, WatchGroup,
@@ -149,7 +148,6 @@ pub(super) fn card_data(card: &TitleCard) -> TitleCardData {
             Verdict::Unavailable => 3,
         },
         region_name: card.region_name.as_str().into(),
-        link: card.watch.link.as_deref().unwrap_or_default().into(),
     }
 }
 
@@ -294,6 +292,7 @@ impl Controller {
         self.card_revealed(ui, surface, with_poster);
         self.show_slot(ui, surface);
         self.request_logos(ui);
+        self.prepare_service_links(surface);
     }
 
     fn card_revealed(&mut self, ui: &AppWindow, surface: Surface, with_poster: bool) {
@@ -332,6 +331,7 @@ impl Controller {
                         .and_then(|path| self.logos.get(&logo_key(path, px)))
                         .cloned()
                         .unwrap_or_default(),
+                    opens_service: watch_links::opens_service(chip.provider_id),
                 })
                 .collect();
             let model = Rc::new(VecModel::from(chips));
@@ -367,12 +367,38 @@ impl Controller {
         }
     }
 
-    pub(super) fn open_card_link(&mut self, surface: Surface) {
-        let link = self.slot(surface).card().and_then(|card| card.watch.link.as_deref());
-        if let Some(link) = link
-            && !platform::shell::open_url(link)
-        {
-            log_warn!("refused to open a non-web link");
+    /// A service button: the worker works out the link (the title's page on the service, its
+    /// search, or TMDB's watch page) and opens it.
+    pub(super) fn open_service(&mut self, surface: Surface, group: i32, chip: i32) {
+        let Some(card) = self.slot(surface).card() else { return };
+        let chip = usize::try_from(group)
+            .ok()
+            .and_then(|g| card.watch.groups.get(g))
+            .zip(usize::try_from(chip).ok())
+            .and_then(|(group, c)| group.chips.get(c));
+        let Some(chip) = chip else { return };
+        let request = ServiceLinkRequest {
+            title: card.title,
+            name: card.name.clone(),
+            imdb_id: card.imdb_id.clone(),
+            provider_id: chip.provider_id,
+            watch_page: card.watch.link.clone(),
+        };
+        self.send(Command::OpenServiceLink(request));
+    }
+
+    /// A card on screen: its title's exact service links are looked up now, so a button
+    /// opens at once. Only cards with a service that has exact links need it.
+    fn prepare_service_links(&self, surface: Surface) {
+        let Some(card) = self.slot(surface).card() else { return };
+        let wanted = card
+            .watch
+            .groups
+            .iter()
+            .flat_map(|group| &group.chips)
+            .any(|chip| watch_links::uses_service_ids(chip.provider_id));
+        if let Some(imdb_id) = card.imdb_id.clone().filter(|_| wanted) {
+            self.send(Command::PrepareServiceLinks { imdb_id });
         }
     }
 

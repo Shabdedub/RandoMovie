@@ -16,3 +16,4 @@ pub mod services;
 pub mod store;
 pub mod tmdb;
 pub mod util;
+pub mod watch_links;

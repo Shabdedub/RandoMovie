@@ -9,9 +9,16 @@ use windows::core::{HSTRING, PCWSTR, w};
 
 /// Opens an `https://` (or `http://`) URL on a short-lived thread, since launching the
 /// browser can take a moment. Other schemes are refused. Returns false if refused.
+///
+/// With `RANDOMOVIE_NO_BROWSER` set, the link is only written to the log, so tests can check
+/// links without opening browser tabs.
 pub fn open_url(url: &str) -> bool {
     if !(url.starts_with("https://") || url.starts_with("http://")) {
         return false;
+    }
+    if std::env::var_os("RANDOMOVIE_NO_BROWSER").is_some() {
+        crate::log_info!("would open {url} (RANDOMOVIE_NO_BROWSER is set)");
+        return true;
     }
     let url = url.to_owned();
     std::thread::Builder::new()

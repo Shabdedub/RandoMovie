@@ -60,11 +60,28 @@ pub enum Command {
     LoadThumbs(Vec<ImageSpec>),
     /// The title card for a search result or a Library title.
     OpenTitle { id: u64, title: TitleRef },
+    /// A card is on screen: look up its title's ids on streaming services in the background,
+    /// so its service buttons open at once.
+    PrepareServiceLinks { imdb_id: String },
+    /// A service button under "Where to watch" was pressed.
+    OpenServiceLink(ServiceLinkRequest),
     /// Every title in the Library. `id` identifies the answer.
     LoadLibrary { id: u64 },
     /// Undo in the Library: the title marked again exactly as it was.
     Restore(LibraryItem),
     Shutdown,
+}
+
+/// A service button: the title, and which service it names.
+#[derive(Debug, Clone)]
+pub struct ServiceLinkRequest {
+    pub title: TitleRef,
+    /// Searched for on services without an exact link.
+    pub name: String,
+    pub imdb_id: Option<String>,
+    pub provider_id: u32,
+    /// TMDB's watch page for the title, for services the app has no link for.
+    pub watch_page: Option<String>,
 }
 
 /// A title in the Library: marked "Seen it" or "Not interested".

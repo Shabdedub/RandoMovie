@@ -489,8 +489,8 @@ export component LibraryPage inherits Rectangle {
                             poster: LibraryState.poster;
                             backdrop: LibraryState.backdrop;
                             serial: LibraryState.card-serial;
-                            open-link => {
-                                LibraryState.open-where-to-watch();
+                            open-service(group, chip) => {
+                                LibraryState.open-service(group, chip);
                             }
                         }
                     }

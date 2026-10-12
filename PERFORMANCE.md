@@ -14,8 +14,22 @@ filters (0.7.0).
 | Idle CPU | 0 % | 0 ms of CPU in 60 s, across all threads, with a pick on screen and with search results on screen; 0 ms in 30 s with the Library on screen, filters set (0.7.0) |
 | Private working set after about 20 titles | under 50 MB | 22.3 MB private bytes after 30 picks; 22.7 MB after a series of searches and opened titles more |
 | Window interactive after launch | within 0.5 s | Visible 43 to 51 ms after launch; first frame 59 to 63 ms after `main` starts |
-| `RandoMovie.exe` size | under 15 MB | 13.77 MB (14,439,424 bytes) in 0.7.0; 13.63 MB in 0.6.0, 13.17 MB in 0.5.0 |
+| `RandoMovie.exe` size | under 15 MB | 13.80 MB (14,469,632 bytes) in 0.8.0; 13.77 MB in 0.7.0, 13.63 MB in 0.6.0, 13.17 MB in 0.5.0 |
 | IMDb rebuild peak memory | "modest" | About 2 MB extra (phase 1) |
+
+## Service buttons (0.8.0)
+
+Measured on 2026-10-12 from Australia.
+
+| Measurement | Result |
+|---|---|
+| `RandoMovie.exe` | 13.80 MB (14,469,632 bytes), 30 KB more than 0.7.0 |
+| Wikidata's query service (SPARQL), one title | 1.1 to 10.9 s; 32 s for 11 titles at once |
+| Wikidata's API, item search then statements, one title | 2.1 to 3.3 s, 4 to 35 KB transferred |
+| Pressing a service button once its lookup is done | Opens at once (cached in memory and for 30 days on disk) |
+
+The lookup runs in the background when a card that names Netflix, Disney+ or Apple TV shows,
+so the press doesn't wait for it. Other cards make no request. Nothing runs at idle.
 
 ## Library filters (0.7.0)
 

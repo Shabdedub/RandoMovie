@@ -4,17 +4,18 @@
 
 mod images;
 mod library;
+mod links;
 mod messages;
 mod pick;
 mod search;
 
 pub use messages::{
-    CardImageKind, Command, ImageSpec, ImdbInfo, LibraryItem, LogoRequest, TokenSource, TokenStatus,
-    Update,
+    CardImageKind, Command, ImageSpec, ImdbInfo, LibraryItem, LogoRequest, ServiceLinkRequest,
+    TokenSource, TokenStatus, Update,
 };
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -125,6 +126,9 @@ struct Worker {
     search_latest: Cell<u64>,
     /// Titles listed so far for that search, so "Load more" never repeats one.
     search_seen: RefCell<HashSet<TitleRef>>,
+    /// Each title's ids on streaming services, by IMDb id, shared by the lookup a card starts
+    /// and a button press.
+    service_id_lookups: RefCell<HashMap<String, Rc<tokio::sync::OnceCell<randomovie::watch_links::ServiceIds>>>>,
 }
 
 impl Worker {
@@ -154,6 +158,7 @@ impl Worker {
             prefetch: RefCell::new(None),
             search_latest: Cell::new(0),
             search_seen: RefCell::new(HashSet::new()),
+            service_id_lookups: RefCell::new(HashMap::new()),
         }
     }
 
@@ -201,6 +206,8 @@ impl Worker {
             Command::SearchInfo { id, titles } => self.load_row_info(id, titles).await,
             Command::LoadThumbs(specs) => self.load_thumbs(specs),
             Command::OpenTitle { id, title } => self.open_title(id, title).await,
+            Command::PrepareServiceLinks { imdb_id } => self.prepare_service_links(imdb_id).await,
+            Command::OpenServiceLink(request) => self.open_service_link(request).await,
             Command::LoadLibrary { id } => self.load_library(id).await,
             Command::Restore(item) => self.restore(item),
             Command::SaveSettings(_) | Command::Shutdown => {}

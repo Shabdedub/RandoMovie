@@ -6,7 +6,7 @@
 
 import { ScrollView } from "std-widgets.slint";
 import { Theme, Icons } from "theme.slint";
-import { FontIcon, LinkButton, Pill, Skeleton, TextButton } from "widgets.slint";
+import { FontIcon, Pill, Skeleton, TextButton } from "widgets.slint";
 import { TitleCardData, WatchChip, WatchGroup } from "state.slint";
 
 // Sizes shared by the card and the placeholders shown in its place.
@@ -24,23 +24,53 @@ export global CardMetrics {
     }
 }
 
-// One service under "Where to watch": logo and name.
+// One service under "Where to watch": logo and name, a button that opens the title on the
+// service (or TMDB's watch page when the app has no link for the service).
 component WatchChipView inherits Rectangle {
     in property <WatchChip> chip;
     in property <bool> highlighted;
+    // The title, for the button's name.
+    in property <string> title;
+    callback clicked();
 
     width: row.preferred-width;
     height: 32px;
     border-radius: 16px;
-    background: root.highlighted ? Theme.accent-subtle : Theme.raised;
+    background: touch.pressed ? Theme.pressed
+        : touch.has-hover ? Theme.hover
+        : root.highlighted ? Theme.accent-subtle
+        : Theme.raised;
+    animate background { duration: 120ms; }
     border-width: 1px;
-    border-color: root.highlighted ? Theme.accent : Theme.border;
-    accessible-role: AccessibleRole.text;
-    accessible-label: root.chip.name;
+    border-color: root.highlighted ? Theme.accent : touch.has-hover ? Theme.border-strong : Theme.border;
+    accessible-role: button;
+    accessible-label: root.chip.opens-service
+        ? "Watch " + root.title + " on " + root.chip.name + " (opens in your browser)"
+        : root.chip.name + ": see where to watch " + root.title + " (opens in your browser)";
+    accessible-action-default => {
+        root.clicked();
+    }
+
+    focus := FocusScope {
+        focus-on-click: false;
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == Key.Space) {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+        touch := TouchArea {
+            mouse-cursor: MouseCursor.pointer;
+            clicked => {
+                root.clicked();
+            }
+        }
+    }
 
     row := HorizontalLayout {
         padding-left: 4px;
-        padding-right: 12px;
+        padding-right: 10px;
         padding-top: 4px;
         padding-bottom: 4px;
         spacing: 8px;
@@ -63,6 +93,22 @@ component WatchChipView inherits Rectangle {
             vertical-alignment: center;
             accessible-role: none;
         }
+        FontIcon {
+            glyph: Icons.open-link;
+            font-size: 11px;
+            color: Theme.text-muted;
+        }
+    }
+
+    Rectangle {
+        x: -3px;
+        y: -3px;
+        width: root.width + 6px;
+        height: root.height + 6px;
+        border-radius: root.border-radius + 3px;
+        border-width: 2px;
+        border-color: Theme.accent;
+        visible: focus.has-focus;
     }
 }
 
@@ -73,7 +119,8 @@ export component TitleCardView inherits Rectangle {
     in property <image> backdrop;
     // Changes with every new title, to reset "More" and the scroll position.
     in property <int> serial;
-    callback open-link();
+    // A service button: its group and its place in the group.
+    callback open-service(int, int);
 
     property <length> poster-height: CardMetrics.poster-height(root.width, root.height);
     property <bool> overview-expanded;
@@ -242,31 +289,19 @@ export component TitleCardView inherits Rectangle {
                     background: Theme.border;
                 }
 
-                // The header carries the link and the attribution TMDB requires beside
-                // availability, so both stay in view without scrolling.
-                FlexboxLayout {
-                    alignment: space-between;
-                    spacing-horizontal: 16px;
-                    spacing-vertical: 4px;
-                    cross-axis-alignment: center;
-                    VerticalLayout {
-                        spacing: 2px;
-                        Text {
-                            text: "Where to watch in " + root.data.region-name;
-                            font-weight: 600;
-                            color: Theme.text;
-                        }
-                        Text {
-                            text: "Streaming data: JustWatch via TMDB";
-                            font-size: Theme.caption;
-                            color: Theme.text-muted;
-                        }
+                // The attribution TMDB requires sits right under the heading, beside the
+                // availability it credits.
+                VerticalLayout {
+                    spacing: 2px;
+                    Text {
+                        text: "Where to watch in " + root.data.region-name;
+                        font-weight: 600;
+                        color: Theme.text;
                     }
-                    if root.data.link != "": LinkButton {
-                        text: "Open where to watch";
-                        clicked => {
-                            root.open-link();
-                        }
+                    Text {
+                        text: "Streaming data: JustWatch via TMDB";
+                        font-size: Theme.caption;
+                        color: Theme.text-muted;
                     }
                 }
 
@@ -287,7 +322,7 @@ export component TitleCardView inherits Rectangle {
                     }
                 }
 
-                for group in root.groups: VerticalLayout {
+                for group[group-index] in root.groups: VerticalLayout {
                     spacing: 6px;
                     if group.kind != 3: Text {
                         text: group.label;
@@ -306,9 +341,13 @@ export component TitleCardView inherits Rectangle {
                     }
                     if group.kind != 3 || root.rent-buy-open: FlexboxLayout {
                         spacing: 6px;
-                        for chip in group.chips: WatchChipView {
+                        for chip[chip-index] in group.chips: WatchChipView {
                             chip: chip;
                             highlighted: group.kind == 0;
+                            title: root.data.name;
+                            clicked => {
+                                root.open-service(group-index, chip-index);
+                            }
                         }
                     }
                 }

@@ -38,11 +38,13 @@ src/
   worker/pick.rs                pick requests, the prepared next pick, session history, exclusions (binary)
   worker/search.rs              result pages, each row's rating and availability, thumbnails (binary)
   worker/library.rs             marked titles, their saved details, Undo of a removal (binary)
+  worker/links.rs               service buttons: Wikidata lookups, 30-day cache, opening the link (binary)
   worker/messages.rs            Command (UI to worker) and Update (worker to UI)            (binary)
   worker/images.rs              decode, scale to exact pixels, round corners, blur backdrops (binary)
   card.rs                       the title card's display text and where-to-watch groups
   search.rs                     query cleanup, result pages to rows, each row's rating and verdict
   library.rs                    the Library's filters: Movies / Series / Both, genres, genre choices
+  watch_links.rs                where a service button leads: Wikidata ids, checked search links, watch page
   error.rs                      Error / ApiError enums, all Clone + Display, no secrets inside
   paths.rs                      %APPDATA%\RandoMovie and %LOCALAPPDATA%\RandoMovie locations
   format.rs                     "★ 7.8 IMDb · 1.2M votes", runtimes, verdict text
@@ -365,6 +367,30 @@ no `tempfile` (tests use unique folders under the system temp dir).
   but isn't a Tab stop, so Tab doesn't walk through every row. Removals, moves, tab changes and
   opened titles are announced.
 
+## Service buttons (0.8.0)
+
+- **No links in the data.** TMDB's availability lists each service as an id, name, logo and
+  priority, with one link per region to TMDB's own watch page. The card's services became
+  buttons and the "Open where to watch" link went; the JustWatch attribution stays.
+- **Three tiers, decided per provider id.** Netflix, Disney+ and Apple TV open the title's
+  own page when Wikidata records the service's id for the title (properties P1874, P7595 and
+  P7596, P9586 and P9751, using the link formats Wikidata publishes for them). Otherwise, ten
+  services open their own search for the title. Every other service opens TMDB's watch page.
+  Each search link and each exact link format was checked in a browser to show the title;
+  services whose search needs a sign-in or ignores its query (Stan, Paramount+, 7plus, 9Now)
+  aren't in the list. Plans with ads, kids' plans, stores and channels map to their service.
+- **Lookup before the press.** Wikidata's query service took 1 to 32 s per title, so the app
+  uses its plain API instead: a search for the IMDb id, then the item's statements, about 2 to
+  3 s together. A card that names Netflix, Disney+ or Apple TV starts the lookup as it shows.
+  A press during the lookup waits for it through a shared `OnceCell` rather than starting
+  another. Answers, including "no ids", are cached for 30 days in the response cache. A
+  failed lookup isn't cached, so the next press tries again and meanwhile uses the search.
+- **Untrusted data.** Ids from Wikidata go into links only if they are plain letters, digits,
+  dots, dashes and underscores; search text is percent-encoded; only `https://` watch pages
+  are opened.
+- **Testing without a browser.** `RANDOMOVIE_NO_BROWSER` makes the app log each link instead
+  of opening it, so the buttons can be checked end to end through UI Automation.
+
 ## Testing
 
 - Unit tests on the recorded fixtures cover: the eligibility rule and chip grouping, variant
@@ -376,7 +402,8 @@ no `tempfile` (tests use unique folders under the system temp dir).
   the filter bar's steps. The Library added the marked-title list and its saved details, the
   upgrade of a version 1 database (also after an older build reset its version), the
   "Marked 3 days ago" wording, and its filters: type and genre together, unified genre names,
-  and the genre choices.
+  and the genre choices. The service buttons added their links per tier, reading Wikidata's
+  answers, and rejecting unsafe ids; a live test looks up real titles on Wikidata.
 - `tests/live.rs` holds `#[ignore]`d live tests using `TMDB_TOKEN` from `.env`, including the
   acceptance checks for single-service picks, free-only picks and search speed.
 - Every phase ends with a release build, `cargo clippy --all-targets -- -D warnings`, `cargo test`,

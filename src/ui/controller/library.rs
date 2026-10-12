@@ -536,8 +536,9 @@ impl Controller {
         state.set_card_error(SharedString::new());
     }
 
-    pub fn library_open_link(&mut self, _ui: &AppWindow) {
-        self.open_card_link(Surface::Library);
+    /// A service button on an opened Library title's card.
+    pub fn library_open_service(&mut self, _ui: &AppWindow, group: i32, chip: i32) {
+        self.open_service(Surface::Library, group, chip);
     }
 
     pub fn library_card_resized(&mut self, ui: &AppWindow, width: f32, height: f32, poster_width: f32, poster_height: f32) {
